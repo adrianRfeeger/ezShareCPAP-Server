@@ -24,6 +24,13 @@
 ## Pending
 
 - Complete and inspect the first real download result.
-- Owner enters new web and SMB passwords through `/root/ezshare-set-passwords.sh` in CT 114. The script reads hidden input, confirms it, applies file ownership, and starts Compose. Passwords are not printed or stored in Git.
-- Confirm web login, scheduler health, authenticated read-only SMB, and a local OSCAR import.
+- Owner completed web/SMB password setup and started Compose. Passwords are not stored in Git. Both services are running; the downloader reports healthy.
+- Web login and scheduler health are verified. Authenticated read-only SMB and a local OSCAR import still need acceptance testing.
 - Reserve the DHCP address, confirm Proxmox backup coverage, and test a future host reboot during an agreed maintenance window. No host reboot was performed.
+
+
+## Live progress update
+
+Revision `a68cb4d` is deployed. The authenticated dashboard polls live status every two seconds and shows the current phase, directory discovery counts, file download counts/percentage, per-file bytes when available, and elapsed/update times. Scanning, planning and verification have indeterminate progress. Telemetry writes are nonfatal and interrupted unlocked runs are recoverable. Local suite: 64 passing tests; independent review found no remaining important issue after fixes. Live HTTP validation confirmed scanning counters advance on the target. Rendered QA for this update was blocked by the unresponsive browser-control connection.
+
+The first run found 9,473 candidate files. Its old process was stopped gracefully and replaced with the instrumented version while retaining the working archive. It now uses `/config/initial-sync.json` with a separate 86,400-second limit under `ezshare-bootstrap-progress.service`; regular `/config/server.json` keeps the 1,800-second daily limit. First-run publication is still pending. Both Compose services are running; the downloader is healthy. Reboot recovery of this transient initial-sync job is not claimed.
