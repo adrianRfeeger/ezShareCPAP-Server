@@ -34,3 +34,10 @@
 Revision `a68cb4d` is deployed. The authenticated dashboard polls live status every two seconds and shows the current phase, directory discovery counts, file download counts/percentage, per-file bytes when available, and elapsed/update times. Scanning, planning and verification have indeterminate progress. Telemetry writes are nonfatal and interrupted unlocked runs are recoverable. Local suite: 64 passing tests; independent review found no remaining important issue after fixes. Live HTTP validation confirmed scanning counters advance on the target. Rendered QA for this update was blocked by the unresponsive browser-control connection.
 
 The first run found 9,473 candidate files. Its old process was stopped gracefully and replaced with the instrumented version while retaining the working archive. It now uses `/config/initial-sync.json` with a separate 86,400-second limit under `ezshare-bootstrap-progress.service`; regular `/config/server.json` keeps the 1,800-second daily limit. First-run publication is still pending. Both Compose services are running; the downloader is healthy. Reboot recovery of this transient initial-sync job is not claimed.
+
+
+## Page artwork and download ETA
+
+Web image revision `cb39f7b` adds a transparent illustration derived from the app icon, without its rounded-square tile, and a client-side download ETA. The initial-sync container remains on its existing instrumented image and was not restarted. The ETA uses existing live counters, waits for 30 seconds and five completed files, and resets when the run, phase or total changes. Network errors replace the estimate with a waiting message. It excludes subsequent verification and publication.
+
+Validation: 65 Python tests and 5 Node ETA tests pass. Authenticated HTTP checks verify the module MIME type and exact deployed PNG. The browser-control connection remains unavailable, so a rendered-page check is not claimed for this update. No credentials or server network permissions changed.
