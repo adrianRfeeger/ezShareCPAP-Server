@@ -118,3 +118,31 @@ def test_upload_larger_than_regular_form_limit_is_accepted(app):
     root = app.config['CONFIG_PATH'].parent / 'data'
     assert (root / 'work/archive/DATALOG/night.edf').read_bytes() == payload
     assert not app.config['TRANSFERS']
+
+
+def test_mac_connection_script_is_authenticated_and_executable(app):
+    import io, zipfile, subprocess
+    client=app.test_client()
+    assert client.get('/connect-mac.zip').status_code==401
+    response=client.get('/connect-mac.zip',headers=auth(),base_url='http://192.168.8.104:8080')
+    assert response.status_code==200
+    assert 'attachment' in response.headers['Content-Disposition']
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        info=archive.getinfo('Connect-CPAP.command')
+        assert (info.external_attr>>16)&0o111==0o111
+        script=archive.read(info).decode()
+    assert 'smb://cpap@192.168.8.104/CPAP' in script
+    assert '8080' not in script
+    assert 'test-password' not in script
+    assert subprocess.run(['/bin/bash','-n'],input=script,text=True,capture_output=True).returncode==0
+    assert b'/connect-mac.zip' in client.get('/',headers=auth()).data
+
+
+def test_mac_connection_script_quotes_host_and_supports_ipv6(app):
+    import io,zipfile
+    client=app.test_client()
+    response=client.get('/connect-mac.zip',headers=auth(),base_url='http://[::1]:8080')
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        assert b'smb://cpap@[::1]/CPAP' in archive.read('Connect-CPAP.command')
+    response=client.get('/connect-mac.zip',headers=dict(auth(),Host='bad;host:8080'))
+    assert response.status_code==400

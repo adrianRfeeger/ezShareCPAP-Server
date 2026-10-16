@@ -1,6 +1,10 @@
 """Password-protected LAN controls for the downloader."""
 import hashlib
 import hmac
+import io
+import re
+import shlex
+from urllib.parse import urlsplit
 import os
 from pathlib import Path
 import secrets
@@ -82,6 +86,34 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
         status = server.read_live_state(Path(cfg['root']))
         return render_template('index.html', cfg=cfg, status=status, csrf=session['csrf'],
                                notice=request.args.get('notice', ''))
+
+    @app.get('/connect-mac.zip')
+    def connect_mac():
+        host=urlsplit(request.host_url).hostname or ''
+        if not re.fullmatch(r'[A-Za-z0-9.:-]+',host):
+            abort(400)
+        address='['+host+']' if ':' in host else host
+        url='smb://cpap@'+address+'/CPAP'
+        script="""#!/bin/bash
+# Open the read-only CPAP share. macOS asks for the SMB password.
+printf '%s\\n' 'Connecting to the CPAP share. Sign in as cpap when Finder asks.'
+/usr/bin/open """+shlex.quote(url)+"""
+result=$?
+if [ "$result" -ne 0 ]; then
+    printf '%s\\n' 'Could not open Finder. Check that your server is reachable.'
+    read -r -p 'Press Return to close.'
+fi
+exit "$result"
+"""
+        payload=io.BytesIO()
+        with zipfile.ZipFile(payload,'w',compression=zipfile.ZIP_DEFLATED) as archive:
+            info=zipfile.ZipInfo('Connect-CPAP.command')
+            info.create_system=3
+            info.external_attr=0o100755<<16
+            archive.writestr(info,script)
+        payload.seek(0)
+        return send_file(payload,as_attachment=True,download_name='Connect-CPAP-Mac.zip',
+                         mimetype='application/zip')
 
     @app.get('/api/status')
     def live_status():
