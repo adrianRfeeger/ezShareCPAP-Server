@@ -115,7 +115,14 @@ def run_is_active(root):
 
 def read_live_state(root):
     status = read_state(root)
-    if status.get('running') and not run_is_active(root):
+    status['busy'] = run_is_active(root)
+    try:
+        status['import_status'] = json.loads((root/'state/import.json').read_text())
+        if status['import_status'].get('running') and not status['busy']:
+            status['import_status'].update(running=False,error='Previous import was interrupted.')
+    except (OSError,ValueError):
+        status['import_status'] = {}
+    if status.get('running') and not status['busy']:
         status.update(running=False, error='Previous sync stopped before completion. Run Sync now to retry.')
         status['progress'] = {'phase':'interrupted', 'percent':None,
                               'action':'Previous sync was interrupted.'}

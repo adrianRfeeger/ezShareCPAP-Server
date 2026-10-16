@@ -67,3 +67,54 @@ def test_page_serves_illustration_and_eta_module(app):
     assert 'javascript' in module.content_type
     image = client.get('/static/cpap-artwork.png', headers=auth())
     assert image.status_code == 200 and image.data.startswith(b'\x89PNG\r\n\x1a\n')
+
+
+def test_upload_imports_full_card_zip(app):
+    import io,zipfile
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w') as archive:
+        archive.writestr('Identification.tgt',b'device-one')
+        archive.writestr('DATALOG/night.edf',b'sample')
+    stream.seek(0)
+    client=app.test_client();client.get('/',headers=auth())
+    with client.session_transaction() as session: token=session['csrf']
+    response=client.post('/import',headers=auth(),data={'csrf':token,'archive':(stream,'SD_card.zip')})
+    assert response.status_code==200
+    assert response.json['imported']==2
+    root=app.config['CONFIG_PATH'].parent/'data'
+    assert (root/'work/archive/DATALOG/night.edf').read_bytes()==b'sample'
+
+
+def test_download_has_zip_attachment_and_no_working_files(app):
+    import io,zipfile
+    root=app.config['CONFIG_PATH'].parent/'data'
+    snap=root/'published/complete';snap.mkdir(parents=True)
+    (snap/'Identification.tgt').write_bytes(b'device-one')
+    (snap.parent/'current').symlink_to('complete')
+    response=app.test_client().get('/download',headers=auth())
+    assert response.status_code==200
+    assert 'attachment' in response.headers['Content-Disposition']
+    with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+        assert archive.namelist()==['Identification.tgt']
+    assert not list((root/'exports').glob('*.zip'))
+
+
+def test_upload_larger_than_regular_form_limit_is_accepted(app):
+    import io, zipfile
+    payload = bytes(range(256)) * 64
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr('Identification.tgt', b'device-one')
+        archive.writestr('DATALOG/night.edf', payload)
+    assert stream.tell() > app.config['MAX_CONTENT_LENGTH']
+    stream.seek(0)
+    client = app.test_client()
+    client.get('/', headers=auth())
+    with client.session_transaction() as session:
+        token = session['csrf']
+    response = client.post('/import', headers=auth(), data={
+        'csrf': token, 'archive': (stream, 'SD_card.zip')})
+    assert response.status_code == 200
+    root = app.config['CONFIG_PATH'].parent / 'data'
+    assert (root / 'work/archive/DATALOG/night.edf').read_bytes() == payload
+    assert not app.config['TRANSFERS']

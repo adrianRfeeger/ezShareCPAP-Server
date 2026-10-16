@@ -111,3 +111,9 @@ After a power loss, the last fully published dated folder remains the import sou
 ## Validation status
 
 Local Python tests and a simulated HTTP card exercise download, subprocess execution, persistence and publication. The GUI has been checked in a browser, including schedule saving. Docker image builds, nested Docker, Wi-Fi assignment, SMB access, host reboot recovery and real OSCAR imports still require testing on the target server and client. These are deployment acceptance checks, not claims established by the Python suite.
+
+## Importing and downloading SD files
+
+The web page's Local files section accepts a ZIP of the complete SD folder, up to 4 GB (8 GB expanded). Include Identification.tgt at the root, or inside one enclosing folder. Import is available while sync is idle. The importer checks ZIP paths, file integrity and device identification before adding missing files to the working archive. Existing server files are kept. Run Sync now afterward to fetch missing or changed card files and publish a verified snapshot.
+
+Download latest completed SD folder creates a ZIP from the published snapshot. Extract it locally and select that folder in OSCAR. The button becomes available after the first successful sync. Upload and archive preparation are serialized, temporary files are cleaned after interruption, and normal web authentication applies to both actions. ZIP uploads use their stored wall-clock timestamps so the server can compare them with card timestamps.

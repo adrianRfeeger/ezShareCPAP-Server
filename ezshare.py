@@ -5,7 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from wifi_utils import ConnectionManager
-from file_ops import recursive_traversal, list_dir, should_download
+from file_ops import recursive_traversal, list_dir, should_download, local_case_path
 import urllib.parse
 import time
 
@@ -198,14 +198,14 @@ class ezShare:
     def calculate_total_files_from_listing(self, files, dirs, url, dir_path, overwrite):
         total_files = 0
         for filename, file_url, file_ts in files:
-            local_path = dir_path / filename
+            local_path = local_case_path(dir_path / filename)
             if overwrite or should_download(self, local_path, file_ts,
                     getattr(self, '_remote_sizes', {}).get((url, file_url))):
                 total_files += 1
         for dirname, dir_url in dirs:
             if len(dir_path.relative_to(self.path).parts) >= 100:
                 return None
-            new_dir_path = dir_path / dirname
+            new_dir_path = local_case_path(dir_path / dirname)
             absolute_dir_url = urllib.parse.urljoin(url, dir_url)
             nested_total = self.calculate_total_files(absolute_dir_url, new_dir_path, overwrite)
             if nested_total is None:

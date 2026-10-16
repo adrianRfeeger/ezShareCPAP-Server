@@ -47,3 +47,13 @@ Validation: 65 Python tests and 5 Node ETA tests pass. Authenticated HTTP checks
 The first download was completing roughly one file every three seconds with about 9,000 files remaining. Three small root-file requests showed multi-second delays while local fsync tests took approximately 2 to 9 milliseconds. A short Wi-Fi power-save-off comparison showed no clear immediate improvement, and power saving was restored to its prior on setting. These small concurrent samples do not establish a complete throughput benchmark.
 
 Web revision `a91d4b2` labels estimates from fewer than three minutes or 30 observed completed files as early and displays measured files per minute. It does not lower the numerical ETA without evidence. All 65 Python and 6 Node tests pass. The bootstrap container was not restarted, and authenticated HTTP checks confirm the deployed assets.
+
+## Local archive import and snapshot download
+
+The dashboard now accepts complete SD-folder ZIP uploads and downloads the latest completed snapshot as a ZIP. Imports validate the full ZIP and matching device identification, preserve existing files, and share the sync lock. Archive preparation is serialized and interrupted temporary files are recovered. Case-insensitive filename matching lets existing Mac downloads be reused on Linux. ZIP wall-clock timestamps are normalized to the server's card parser.
+
+Wi-Fi power saving is now disabled persistently for ezshare-card at the owner's request. A short comparison did not establish a meaningful speed improvement.
+
+One-off seed transfer completed over SSH. The source ZIP contained 8,443 eligible files and matched the server's device identification. Import added 7,605 files and retained 838 existing files. The initial sync resumed under ezshare-bootstrap-seeded.service with the new image and existing 86,400-second initial-run limit. Authenticated HTTP checks confirmed the upload/download controls, import result and advancing directory scan. Download correctly returns 404 while no completed snapshot exists. Rendered browser testing remains unavailable because the browser-control connection is unresponsive.
+
+Validation: 85 Python tests and 6 Node ETA tests passed, including ZIP corruption/path checks, cancellation, transfer serialization, cleanup and upload-body limits. Independent code review found no remaining important issue in the changes.

@@ -120,3 +120,15 @@ def test_over_one_hundred_sibling_directories_are_supported(tmp_path):
     dirs = [(str(index), f'/dir?dir=A:/{index}') for index in range(150)]
     with patch('ezshare.list_dir', return_value=([], [])):
         assert app.calculate_total_files_from_listing([], dirs, 'http://card/dir', tmp_path, False) == 0
+
+
+def test_existing_case_variant_is_reused(tmp_path):
+    import os,datetime
+    target=tmp_path/'str.edf';target.write_bytes(b'edf-data')
+    stamp=datetime.datetime(2026,6,18,10).timestamp()
+    os.utime(target,(stamp,stamp))
+    app=ezShare();app.network_mode='existing'
+    app.set_params(str(tmp_path),'http://card/dir?dir=A:',None,False,False,False,False,None,None,[],1,0,False)
+    session=FakeSession()
+    with patch('ezshare.requests.Session',return_value=session): assert app.run()
+    assert not any('download?' in url for url in session.get_urls)

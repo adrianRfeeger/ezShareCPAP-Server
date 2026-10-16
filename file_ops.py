@@ -12,6 +12,16 @@ import time
 
 logger = logging.getLogger(__name__)
 
+def local_case_path(path):
+    """Resolve FAT-style case-insensitive names on a Linux archive."""
+    if path.exists() or not path.parent.is_dir():
+        return path
+    matches=[p for p in path.parent.iterdir() if p.name.casefold()==path.name.casefold()]
+    if len(matches)>1:
+        raise ValueError('Ambiguous file names in working archive')
+    return matches[0] if matches else path
+
+
 def recursive_traversal(ezshare_instance, url, dir_path, total_files, processed_files, is_running):
     """
     Recursively traverse directories to list and download files.
@@ -151,7 +161,7 @@ def check_files(ezshare_instance, files, url, dir_path, total_files, processed_f
             ezshare_instance.update_status('Process cancelled.', 'info')
             break
 
-        local_path = dir_path / filename
+        local_path = local_case_path(dir_path / filename)
         absolute_file_url = urllib.parse.urljoin(url, 'download?' + file_url)
         
         if should_download(ezshare_instance, local_path, file_ts,
@@ -263,7 +273,7 @@ def check_dirs(ezshare_instance, dirs, url, dir_path, total_files, processed_fil
             ezshare_instance.update_status('Process cancelled.', 'info')
             break
 
-        new_dir_path = dir_path / dirname
+        new_dir_path = local_case_path(dir_path / dirname)
         new_dir_path.mkdir(exist_ok=True)
         absolute_dir_url = urllib.parse.urljoin(url, dir_url)
         processed_files = recursive_traversal(ezshare_instance, absolute_dir_url, new_dir_path, total_files, processed_files, is_running)
