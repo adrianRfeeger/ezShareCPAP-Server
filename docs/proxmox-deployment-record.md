@@ -41,3 +41,9 @@ The first run found 9,473 candidate files. Its old process was stopped gracefull
 Web image revision `cb39f7b` adds a transparent illustration derived from the app icon, without its rounded-square tile, and a client-side download ETA. The initial-sync container remains on its existing instrumented image and was not restarted. The ETA uses existing live counters, waits for 30 seconds and five completed files, and resets when the run, phase or total changes. Network errors replace the estimate with a waiting message. It excludes subsequent verification and publication.
 
 Validation: 65 Python tests and 5 Node ETA tests pass. Authenticated HTTP checks verify the module MIME type and exact deployed PNG. The browser-control connection remains unavailable, so a rendered-page check is not claimed for this update. No credentials or server network permissions changed.
+
+## ETA diagnostic check
+
+The first download was completing roughly one file every three seconds with about 9,000 files remaining. Three small root-file requests showed multi-second delays while local fsync tests took approximately 2 to 9 milliseconds. A short Wi-Fi power-save-off comparison showed no clear immediate improvement, and power saving was restored to its prior on setting. These small concurrent samples do not establish a complete throughput benchmark.
+
+Web revision `a91d4b2` labels estimates from fewer than three minutes or 30 observed completed files as early and displays measured files per minute. It does not lower the numerical ETA without evidence. All 65 Python and 6 Node tests pass. The bootstrap container was not restarted, and authenticated HTTP checks confirm the deployed assets.
