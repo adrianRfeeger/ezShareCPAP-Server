@@ -37,16 +37,20 @@ import { DownloadETA, formatDuration } from './eta.mjs';
       const eta = estimate.observe(progress);
       const stale = progress.updated_at && Date.now() - Date.parse(progress.updated_at) > 30000;
       let etaText = '';
+      const estimateLabel = estimate.preliminary ? 'Early download estimate' : 'Download ETA';
       if (state.running && progress.phase === 'downloading') {
         etaText = stale ? 'Download ETA: waiting for an update' :
           eta == null ? 'Download ETA: calculating from recent downloads' :
-          `Download ETA: ${eta < 60 ? '' : 'about '}${formatDuration(eta)} remaining`;
+          `${estimateLabel}: ${eta < 60 ? '' : 'about '}${formatDuration(eta)} remaining`;
       } else if (state.running) {
         etaText = ['scanning', 'planning', 'starting', 'retrying'].includes(progress.phase) ?
           'Download ETA will appear once files are downloading.' :
           'Finishing checks. Download ETA no longer applies.';
       }
       text('download-eta', etaText);
+      if (eta != null && !stale && estimate.filesPerMinute != null) {
+        text('progress-detail', `${detail} · Recent pace: about ${estimate.filesPerMinute.toFixed(1)} files/min`);
+      }
       const elapsed = state.running && state.last_attempt ? `Elapsed ${seconds((Date.now() - Date.parse(state.last_attempt))/1000)} s` : '';
       const age = progress.updated_at ? `Updated ${seconds((Date.now() - Date.parse(progress.updated_at))/1000)} s ago` : '';
       text('progress-freshness', [elapsed, age].filter(Boolean).join(' · '));

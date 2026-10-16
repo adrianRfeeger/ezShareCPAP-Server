@@ -35,3 +35,15 @@ test('formats hours and rounds rather than promises exact seconds', () => {
   assert.equal(formatDuration(1800), '30 min');
   assert.equal(formatDuration(20), 'less than a minute');
 });
+test('marks short observations preliminary and exposes the measured pace', () => {
+  const eta = new DownloadETA();
+  eta.observe(frame(0), 0);
+  eta.observe(frame(10), 30);
+  assert.equal(eta.preliminary, true);
+  assert.equal(eta.filesPerMinute, 20);
+  eta.observe(frame(60), 180);
+  assert.equal(eta.preliminary, false);
+  eta.observe(frame(0,{run_id:'new'}),200);
+  assert.equal(eta.preliminary,true);
+  assert.equal(eta.filesPerMinute,null);
+});

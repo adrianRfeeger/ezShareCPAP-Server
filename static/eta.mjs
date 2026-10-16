@@ -1,7 +1,9 @@
 // Estimates download time only; card checks and snapshot publication follow.
 export class DownloadETA {
-  constructor() { this.samples = []; this.key = null; }
+  constructor() { this.samples = []; this.key = null; this.preliminary = true; this.filesPerMinute = null; }
   observe(progress, now = performance.now() / 1000) {
+    this.preliminary = true;
+    this.filesPerMinute = null;
     const {run_id, phase, files_done: done, files_total: total} = progress;
     const key = JSON.stringify([run_id, phase, total]);
     if (key !== this.key || (this.samples.length && done < this.samples.at(-1).done)) {
@@ -16,6 +18,8 @@ export class DownloadETA {
     const start = this.samples[0];
     const elapsed = now - start.time;
     const finished = done - start.done;
+    this.preliminary = elapsed < 180 || finished < 30;
+    this.filesPerMinute = elapsed > 0 && finished > 0 ? finished / elapsed * 60 : null;
     if (elapsed < 30 || finished < 5) return null;
     return Math.ceil((total - done) * elapsed / finished);
   }
