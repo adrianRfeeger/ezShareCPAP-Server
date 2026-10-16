@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import uuid
+import storage
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,12 @@ def load_config(path):
             cfg.setdefault(name, default)
             if type(cfg[name]) is not int or not low <= cfg[name] <= high:
                 raise ValueError(f'{name} must be an integer from {low} to {high}')
+        cfg.setdefault('retention_enabled',False)
+        cfg.setdefault('retention_keep',2)
+        cfg.setdefault('storage_reserve_bytes',storage.RESERVE_BYTES)
+        if type(cfg['retention_enabled']) is not bool: raise ValueError('retention_enabled must be boolean')
+        if type(cfg['retention_keep']) is not int or not 1<=cfg['retention_keep']<=10: raise ValueError('Keep between 1 and 10 snapshots')
+        if type(cfg['storage_reserve_bytes']) is not int or cfg['storage_reserve_bytes']<268435456: raise ValueError('Storage reserve must be at least 256 MiB')
         cfg.setdefault('run_on_startup', True)
         if type(cfg['run_on_startup']) is not bool:
             raise ValueError('run_on_startup must be boolean')
@@ -116,6 +123,7 @@ def run_is_active(root):
 def read_live_state(root):
     status = read_state(root)
     status['busy'] = run_is_active(root)
+    status['storage'] = storage.storage_status(root)
     try:
         status['import_status'] = json.loads((root/'state/import.json').read_text())
         if status['import_status'].get('running') and not status['busy']:
@@ -188,6 +196,10 @@ def download_child(cfg):
 
 
 def copy_archive(source, destination, deadline):
+    with storage.reserve_space(source.parents[1],'snapshot',storage.tree_size(source)[0]) as lease:
+        return _copy_archive(source,destination,deadline,lease)
+
+def _copy_archive(source,destination,deadline,lease):
     def check():
         if STOP.is_set() or time.monotonic() >= deadline:
             raise RuntimeError('Stopped or timed out while building snapshot')
@@ -202,6 +214,8 @@ def copy_archive(source, destination, deadline):
                 if not block:
                     break
                 writer.write(block)
+                writer.flush()
+                lease.consume(len(block))
         shutil.copystat(src, dst)
         return dst
     check()
@@ -269,15 +283,20 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                 if STOP.is_set():
                     raise RuntimeError('Stopped before publication')
                 snapshot = published / name
-                staging.rename(snapshot)
-                staging = None
-                pointer = published / ('.current-' + name)
-                pointer.symlink_to(name, target_is_directory=True)
-                pointer.replace(published / 'current')
+                with storage.snapshot_access(root,True):
+                    staging.rename(snapshot)
+                    staging = None
+                    pointer = published / ('.current-' + name)
+                    pointer.symlink_to(name, target_is_directory=True)
+                    pointer.replace(published / 'current')
                 status.update(last_success=datetime.now(timezone.utc).isoformat(),
                               snapshot=name, files=count, error=None)
                 progress({'phase': 'completed', 'action': 'Sync completed. Snapshot ready for OSCAR.', 'percent': 100}, force=True)
                 return_code = 0
+                if cfg.get('retention_enabled'):
+                    try: storage.prune_snapshots(root,cfg.get('retention_keep',2))
+                    except (OSError,ValueError) as exc: status['storage_warning']=str(exc)
+                storage.refresh_inventory(root)
             except Exception as exc:
                 log.exception('Sync failed')
                 status['error'] = str(exc)

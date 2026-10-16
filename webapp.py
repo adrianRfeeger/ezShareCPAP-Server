@@ -1,4 +1,7 @@
 """Password-protected LAN controls for the downloader."""
+import base64
+import storage
+import upload_server
 import hashlib
 import hmac
 import io
@@ -28,6 +31,8 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
     if len(password) < 16:
         raise ValueError('Web password must contain at least 16 characters')
     app = Flask(__name__)
+    app.request_class=upload_server.UploadRequest
+    app.config['UPLOAD_AUTH']='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
     app.secret_key = hashlib.sha256(('ezshare-session:' + password).encode()).digest()
     app.config.update(CONFIG_PATH=config_path, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE='Strict', MAX_CONTENT_LENGTH=4096)
@@ -133,7 +138,12 @@ exit "$result"
         path=directory/('upload-'+secrets.token_hex(12)+'.zip')
         try:
             with archive_io.transfer_lock(root):
-                upload.save(path)
+                lease=upload_server.request_lease(request)
+                with path.open('wb') as target:
+                    while block:=upload.stream.read(1024*1024):
+                        if server.STOP.is_set(): raise RuntimeError('Import was interrupted')
+                        target.write(block);target.flush()
+                        if lease:lease.consume(len(block))
                 result=archive_io.import_seed_zip(path,root)
             return jsonify(result)
         except BlockingIOError:
@@ -170,12 +180,36 @@ exit "$result"
     def too_large(error):
         return jsonify(error='Request is too large. ZIP uploads are limited to 4 GB.'),413
 
+    @app.get('/api/storage/preview')
+    def storage_preview():
+        try:
+            with storage.snapshot_access(root,False):
+                return jsonify(storage.retention_preview(root,int(request.args.get('keep','2'))))
+        except (ValueError,OSError) as exc: return jsonify(error=str(exc)),400
+
+    @app.post('/storage/prune')
+    def storage_prune():
+        try:
+            with server.run_lock(root/'state'):
+                storage.prune_snapshots(root,config()['retention_keep'])
+            return redirect('/?notice=Snapshot+cleanup+finished',303)
+        except BlockingIOError: return 'A sync or import is running.',409
+        except (ValueError,OSError) as exc: return str(exc),400
+
     @app.post('/settings')
     def settings():
         candidate = dict(config())
         candidate.pop('_config_path', None)
         candidate.update(time=request.form.get('time'), timezone=request.form.get('timezone'),
                          run_on_startup=request.form.get('run_on_startup') == 'on')
+        if 'retention_keep' in request.form:
+            try:candidate['retention_keep']=int(request.form['retention_keep'])
+            except ValueError:return 'Snapshot count must be a number',400
+            candidate['retention_enabled']=request.form.get('retention_enabled')=='on'
+            if candidate['retention_enabled']:
+                try:
+                    with storage.snapshot_access(root,False):storage.retention_preview(root,candidate['retention_keep'])
+                except (ValueError,OSError) as exc:return str(exc),400
         # Validate before replacing the actual settings; preserve card URL and paths.
         temporary = config_path.with_name('.validate-' + secrets.token_hex(8) + '.json')
         try:
@@ -205,6 +239,8 @@ exit "$result"
         return redirect('/?notice=Sync+requested.+Progress+will+appear+below.', code=303)
 
     if start_scheduler:
+        inventory=threading.Thread(target=storage.inventory_loop,args=(root,server.STOP),daemon=True)
+        workers.append(inventory);inventory.start()
         scheduler = threading.Thread(target=lambda: server.serve(config()), daemon=True)
         workers.append(scheduler)
         scheduler.start()
@@ -221,6 +257,7 @@ def main():
     tempfile.tempdir = str(uploads_tmp)
     listener = create_server(application, host='0.0.0.0', port=8080, threads=4,
                              max_request_body_size=archive_io.MAX_ZIP_BYTES + 1024*1024)
+    listener.channel_class=upload_server.upload_channel(root,application.config['UPLOAD_AUTH'],archive_io.MAX_ZIP_BYTES+1024*1024,server.load_config(application.config['CONFIG_PATH'])['storage_reserve_bytes'])
     signal.signal(signal.SIGTERM, server.stop)
     signal.signal(signal.SIGINT, server.stop)
     thread = threading.Thread(target=listener.run, daemon=True)

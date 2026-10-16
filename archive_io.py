@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 import hashlib
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -12,6 +12,7 @@ import uuid
 import zipfile
 
 import server
+import storage
 from file_ops import local_case_path
 
 MAX_ZIP_BYTES = 4 * 1024**3
@@ -79,11 +80,10 @@ def import_seed_zip(zip_path, root):
         try:
             if Path(zip_path).stat().st_size>MAX_ZIP_BYTES:
                 raise ValueError('ZIP exceeds the 4 GB upload limit')
-            with zipfile.ZipFile(zip_path) as archive:
+            with ExitStack() as stack, zipfile.ZipFile(zip_path) as archive:
                 entries=_entries(archive)
                 expanded=sum(info.file_size for info,_ in entries)
-                if shutil.disk_usage(root).free < expanded+RESERVE_BYTES:
-                    raise ValueError('Not enough free space to validate this archive')
+                lease=stack.enter_context(storage.reserve_space(root,'import extraction',expanded))
                 directory=root/'imports';directory.mkdir(parents=True,exist_ok=True)
                 staging=Path(tempfile.mkdtemp(prefix='seed-',dir=directory))
                 extracted=0
@@ -97,6 +97,8 @@ def import_seed_zip(zip_path, root):
                             extracted+=len(block)
                             if extracted>MAX_EXPANDED_BYTES: raise ValueError('Expanded ZIP exceeds limit')
                             target.write(block)
+                            target.flush()
+                            lease.consume(len(block))
                     # ZIP stores wall-clock dates. The server's card parser uses UTC wall time.
                     stamp=datetime(*info.date_time,tzinfo=timezone.utc).timestamp()
                     os.utime(destination,(stamp,stamp))
@@ -136,6 +138,10 @@ def import_seed_zip(zip_path, root):
 
 
 def build_snapshot_zip(root):
+    with storage.snapshot_access(root,False):
+        return _build_snapshot_zip(root)
+
+def _build_snapshot_zip(root):
     root=Path(root)
     published=(root/'published').resolve()
     current=published/'current'
@@ -149,13 +155,14 @@ def build_snapshot_zip(root):
     exports=root/'exports';exports.mkdir(parents=True,exist_ok=True)
     output=exports/(uuid.uuid4().hex+'.zip')
     try:
-        with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_STORED,allowZip64=True) as archive:
+        with storage.reserve_space(root,'ZIP export',sum(p.stat().st_size for p in files)+len(files)*256) as lease, zipfile.ZipFile(output,'w',compression=zipfile.ZIP_STORED,allowZip64=True) as archive:
             for path in sorted(files):
                 info=zipfile.ZipInfo.from_file(path,path.relative_to(snapshot).as_posix())
                 with path.open('rb') as source, archive.open(info,'w',force_zip64=True) as target:
                     while block:=source.read(1024*1024):
                         if server.STOP.is_set(): raise RuntimeError('Download preparation was interrupted')
                         target.write(block)
+                        lease.consume(len(block))
         return output
     except Exception:
         output.unlink(missing_ok=True)
