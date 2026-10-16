@@ -1,8 +1,10 @@
+import { DownloadETA, formatDuration } from './eta.mjs';
 (() => {
   const el = id => document.getElementById(id);
   const text = (id, value) => { el(id).textContent = value; };
   const seconds = value => Math.max(0, Math.floor(value));
   const bytes = value => value >= 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${Math.round(value / 1024)} KB`;
+  const estimate = new DownloadETA();
   let fetching = false;
   let historyKey = '';
   async function refresh() {
@@ -32,6 +34,19 @@
         detail += ' · Percentage available during download';
       } else if (progress.phase === 'completed') detail = 'Completed';
       text('progress-detail', detail);
+      const eta = estimate.observe(progress);
+      const stale = progress.updated_at && Date.now() - Date.parse(progress.updated_at) > 30000;
+      let etaText = '';
+      if (state.running && progress.phase === 'downloading') {
+        etaText = stale ? 'Download ETA: waiting for an update' :
+          eta == null ? 'Download ETA: calculating from recent downloads' :
+          `Download ETA: ${eta < 60 ? '' : 'about '}${formatDuration(eta)} remaining`;
+      } else if (state.running) {
+        etaText = ['scanning', 'planning', 'starting', 'retrying'].includes(progress.phase) ?
+          'Download ETA will appear once files are downloading.' :
+          'Finishing checks. Download ETA no longer applies.';
+      }
+      text('download-eta', etaText);
       const elapsed = state.running && state.last_attempt ? `Elapsed ${seconds((Date.now() - Date.parse(state.last_attempt))/1000)} s` : '';
       const age = progress.updated_at ? `Updated ${seconds((Date.now() - Date.parse(progress.updated_at))/1000)} s ago` : '';
       text('progress-freshness', [elapsed, age].filter(Boolean).join(' · '));
@@ -60,6 +75,7 @@
       }
     } catch (_) {
       text('live-connection', 'Live status is unavailable. Reconnecting automatically.');
+      text('download-eta', 'Download ETA: waiting for a live update');
     } finally { fetching = false; }
   }
   refresh();

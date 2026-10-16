@@ -54,3 +54,16 @@ def test_live_status_api_requires_authentication(app):
     assert response.status_code == 200
     assert response.json['progress']['percent'] is None
     assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_page_serves_illustration_and_eta_module(app):
+    client = app.test_client()
+    page = client.get('/', headers=auth()).text
+    assert '/static/cpap-artwork.png' in page
+    assert 'id="download-eta"' in page
+    assert 'type="module" src="/static/progress.js"' in page
+    module = client.get('/static/eta.mjs', headers=auth())
+    assert module.status_code == 200
+    assert 'javascript' in module.content_type
+    image = client.get('/static/cpap-artwork.png', headers=auth())
+    assert image.status_code == 200 and image.data.startswith(b'\x89PNG\r\n\x1a\n')
