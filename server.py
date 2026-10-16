@@ -1,5 +1,6 @@
 """Linux headless service: scheduled downloads and completed card snapshots."""
 import argparse
+import ipaddress
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
@@ -26,6 +27,17 @@ CHILD = None
 ACTIVE_APP = None
 
 
+def validate_smb_host(host):
+    if not isinstance(host,str):raise ValueError('SMB host must be text')
+    if not host:return host
+    try:return str(ipaddress.ip_address(host))
+    except ValueError:pass
+    labels=host.rstrip('.').split('.')
+    if len(host)>253 or not all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?',part) for part in labels):
+        raise ValueError('Use only an SMB hostname or IP address, without a port or path')
+    return host
+
+
 def load_config(path):
     try:
         cfg = json.loads(Path(path).read_text())
@@ -48,6 +60,8 @@ def load_config(path):
             cfg.setdefault(name, default)
             if type(cfg[name]) is not int or not low <= cfg[name] <= high:
                 raise ValueError(f'{name} must be an integer from {low} to {high}')
+        cfg.setdefault('smb_host','')
+        validate_smb_host(cfg['smb_host'])
         cfg.setdefault('resume_interrupted',True)
         cfg.setdefault('initial_sync_timeout',86400)
         if type(cfg['resume_interrupted']) is not bool: raise ValueError('resume_interrupted must be boolean')

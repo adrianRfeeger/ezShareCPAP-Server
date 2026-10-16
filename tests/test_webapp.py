@@ -146,3 +146,20 @@ def test_mac_connection_script_quotes_host_and_supports_ipv6(app):
         assert b'smb://cpap@[::1]/CPAP' in archive.read('Connect-CPAP.command')
     response=client.get('/connect-mac.zip',headers=dict(auth(),Host='bad;host:8080'))
     assert response.status_code==400
+
+def test_explicit_smb_host_overrides_dashboard(app):
+ import io,zipfile
+ cfg=json.loads(app.config['CONFIG_PATH'].read_text());cfg['smb_host']='192.168.8.104'
+ app.config['CONFIG_PATH'].write_text(json.dumps(cfg))
+ client=app.test_client()
+ response=client.get('/connect-mac.zip',headers=auth(),base_url='https://proxy.example')
+ with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+  assert b'smb://cpap@192.168.8.104/CPAP' in archive.read('Connect-CPAP.command')
+ assert b'href="smb://cpap@192.168.8.104/CPAP"' in client.get('/',headers=auth()).data
+
+@pytest.mark.parametrize('host',['https://host','host:445','user@host','host/path','bad host','bad;host'])
+def test_invalid_smb_host_is_rejected(app,host):
+ import server
+ cfg=json.loads(app.config['CONFIG_PATH'].read_text());cfg['smb_host']=host
+ app.config['CONFIG_PATH'].write_text(json.dumps(cfg))
+ with pytest.raises(ValueError):server.load_config(app.config['CONFIG_PATH'])

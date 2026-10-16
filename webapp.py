@@ -26,6 +26,13 @@ import server
 import archive_io
 
 
+def smb_url(configured_host,request_host):
+    host=server.validate_smb_host(configured_host or urlsplit('http://'+request_host).hostname or '')
+    if not host:raise ValueError('SMB hostname is missing')
+    address='['+host+']' if ':' in host else host
+    return 'smb://cpap@'+address+'/CPAP'
+
+
 def create_app(config_path='/config/server.json', password=None, start_scheduler=True):
     config_path = Path(config_path)
     server.load_config(config_path)
@@ -98,15 +105,12 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
         cfg = config()
         status = live_state()
         return render_template('index.html', cfg=cfg, status=status, csrf=session['csrf'],
-                               notice=request.args.get('notice', ''))
+                               notice=request.args.get('notice', ''),smb_address=smb_url(cfg.get('smb_host',''),request.host))
 
     @app.get('/connect-mac.zip')
     def connect_mac():
-        host=urlsplit(request.host_url).hostname or ''
-        if not re.fullmatch(r'[A-Za-z0-9.:-]+',host):
-            abort(400)
-        address='['+host+']' if ':' in host else host
-        url='smb://cpap@'+address+'/CPAP'
+        try:url=smb_url(config().get('smb_host',''),request.host)
+        except ValueError:abort(400)
         script="""#!/bin/bash
 # Open the read-only CPAP share. macOS asks for the SMB password.
 printf '%s\\n' 'Connecting to the CPAP share. Sign in as cpap when Finder asks.'
@@ -219,6 +223,7 @@ exit "$result"
         candidate.pop('_config_path', None)
         candidate.update(time=request.form.get('time'), timezone=request.form.get('timezone'),
                          run_on_startup=request.form.get('run_on_startup') == 'on')
+        candidate['smb_host']=request.form.get('smb_host',candidate.get('smb_host',''))
         if 'retention_keep' in request.form:
             try:candidate['retention_keep']=int(request.form['retention_keep'])
             except ValueError:return 'Snapshot count must be a number',400
