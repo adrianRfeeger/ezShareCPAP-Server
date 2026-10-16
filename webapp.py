@@ -2,6 +2,8 @@
 import base64
 import storage
 import run_control
+import scheduling
+from datetime import datetime,timezone
 import upload_server
 import hashlib
 import hmac
@@ -53,6 +55,11 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
         cfg['_config_path'] = str(config_path.resolve())
         return cfg
 
+    def live_state():
+        cfg=config();state=server.read_live_state(root)
+        state['schedule']=scheduling.schedule_status(datetime.now(timezone.utc),cfg,state)
+        return state
+
     @app.before_request
     def protect():
         if request.endpoint == 'import_zip':
@@ -89,7 +96,7 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
     @app.get('/')
     def index():
         cfg = config()
-        status = server.read_live_state(Path(cfg['root']))
+        status = live_state()
         return render_template('index.html', cfg=cfg, status=status, csrf=session['csrf'],
                                notice=request.args.get('notice', ''))
 
@@ -123,7 +130,16 @@ exit "$result"
 
     @app.get('/api/status')
     def live_status():
-        return jsonify(server.read_live_state(Path(config()['root'])))
+        return jsonify(live_state())
+
+    @app.get('/api/schedule/preview')
+    def preview_schedule():
+        cfg=config()
+        cfg.update(time=request.args.get('time',cfg['time']),timezone=request.args.get('timezone',cfg['timezone']))
+        try:
+            if not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]',cfg['time']):raise ValueError('Invalid time')
+            return jsonify(scheduling.schedule_status(datetime.now(timezone.utc),cfg,live_state()))
+        except (ValueError,KeyError):return jsonify(error='Enter a valid time and timezone'),400
 
     @app.post('/import')
     def import_zip():

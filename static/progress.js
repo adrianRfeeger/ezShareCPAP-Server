@@ -1,3 +1,4 @@
+import {formatTimestamp} from './status-view.mjs';
 import { DownloadETA, formatDuration } from './eta.mjs';
 (() => {
   const el = id => document.getElementById(id);
@@ -56,8 +57,8 @@ import { DownloadETA, formatDuration } from './eta.mjs';
       const age = progress.updated_at ? `Updated ${seconds((Date.now() - Date.parse(progress.updated_at))/1000)} s ago` : '';
       text('progress-freshness', [elapsed, age].filter(Boolean).join(' · '));
       text('live-connection', '');
-      text('last-success', state.last_success || 'No completed downloads yet');
-      text('last-attempt', state.last_attempt || 'Not started');
+      text('last-success', state.last_success ? formatTimestamp(state.last_success,state.schedule?.timezone) : 'No completed downloads yet');
+      text('last-attempt', state.last_attempt ? formatTimestamp(state.last_attempt,state.schedule?.timezone) : 'Not started');
       text('snapshot-files', state.files ?? 'Not available');
       el('sync-button').disabled = !!state.busy;
       text('run-error', state.error || '');
@@ -65,12 +66,12 @@ import { DownloadETA, formatDuration } from './eta.mjs';
       text('snapshot-name', state.snapshot || '');
       el('snapshot-row').hidden = !state.snapshot;
       const history = state.history || [];
-      const key = JSON.stringify(history);
+      const key = JSON.stringify([history,state.schedule?.timezone]);
       if (key !== historyKey) {
         historyKey = key;
         el('history-body').replaceChildren(...[...history].reverse().map(run => {
           const row = document.createElement('tr');
-          for (const value of [run.finished, run.result, `${run.duration_seconds} s`]) {
+          for (const value of [formatTimestamp(run.finished,state.schedule?.timezone), run.result, `${run.duration_seconds} s`]) {
             const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
           }
           return row;

@@ -17,6 +17,7 @@ import time
 import uuid
 import storage
 import run_control
+import scheduling
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
@@ -360,15 +361,7 @@ def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, r
 
 
 def scheduled_date(now, cfg, last_date):
-    local = now.astimezone(ZoneInfo(cfg['timezone']))
-    date = local.date().isoformat()
-    if last_date and date <= last_date:
-        return None
-    hour, minute = map(int, cfg['time'].split(':'))
-    # Wall-clock comparison runs at the first valid minute after a spring gap.
-    if (local.hour, local.minute) >= (hour, minute):
-        return date
-    return None
+    return scheduling.schedule_decision(now,cfg,last_date)['due_date']
 
 
 def serve(cfg):
