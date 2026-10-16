@@ -58,6 +58,12 @@ The app attempts to detect your installed OSCAR version and displays it in the *
   - **Windows:** PowerShell 5.0+ and `netsh` (built into Windows 10+)
   - **Linux:** NetworkManager/`nmcli` (for Wi-Fi connectivity)
 
+## Docker server version
+
+The server version provides a password-protected web interface, scheduled downloads, completed snapshots, and a read-only SMB share for local OSCAR import. It uses an existing network connection to the card rather than managing Wi-Fi inside Docker.
+
+See [Docker deployment](docs/docker-deployment.md) for Proxmox LXC prerequisites, Docker installation, configuration, and acceptance checks.
+
 ## Installation
 
 ### From Release Version

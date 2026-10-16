@@ -24,9 +24,16 @@ def recursive_traversal(ezshare_instance, url, dir_path, total_files, processed_
     :param is_running: Function to check if the process should continue running.
     :return: Updated count of processed files.
     """
+    visited = getattr(ezshare_instance, '_download_visited', set())
+    ezshare_instance._download_visited = visited
+    if url in visited or len(visited) > 10000:
+        ezshare_instance.transfer_failed = True
+        return processed_files
+    visited.add(url)
     files, dirs = list_dir(ezshare_instance, url)
     if files is None and dirs is None:
         ezshare_instance.update_status('Unable to retrieve directory listing. Connection issue suspected.', 'error')
+        ezshare_instance.transfer_failed = True
         return processed_files
     processed_files = check_files(ezshare_instance, files, url, dir_path, total_files, processed_files, is_running)
     processed_files = check_dirs(ezshare_instance, dirs, url, dir_path, total_files, processed_files, is_running)
@@ -44,9 +51,24 @@ def list_dir(ezshare, url):
         response = ezshare.session.get(url, timeout=5)
         response.raise_for_status()
         soup = bs4.BeautifulSoup(response.text, 'html.parser')
+        origin = urllib.parse.urlparse(url)
+        for link in soup.select('pre a[href]'):
+            target = urllib.parse.urlparse(urllib.parse.urljoin(url, link['href']))
+            if (target.scheme, target.netloc) != (origin.scheme, origin.netloc):
+                raise ValueError('Directory link leaves card origin')
         files, dirs = parse_directory_listing(ezshare, soup)
+        if not hasattr(ezshare, '_listing_fingerprints'):
+            ezshare._listing_fingerprints = {}
+            ezshare._remote_sizes = {}
+        ezshare._listing_fingerprints[url] = soup.find('pre').get_text()
+        for link in soup.select('pre a[href]'):
+            tail = ''.join(str(part) for part in link.next_siblings).split('\n')[0].strip()
+            size = re.fullmatch(r'(\d+)(?:\s*[Bb](?:ytes)?)?', tail)
+            if size:
+                query = urllib.parse.urlparse(link['href']).query
+                ezshare._remote_sizes[(url, query)] = int(size.group(1))
         return files, dirs
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
         logger.error(f"Error fetching directory listing from {url}: {e}")
         return None, None
 
@@ -67,8 +89,11 @@ def parse_directory_listing(ezshare, soup):
     # Check if <pre> tag exists
     if pre_tag is None:
         logging.error("No <pre> tag found in the HTML response.")
-        return files, dirs  # Return empty lists if <pre> tag is not found
+        raise ValueError('Invalid directory listing: missing pre element')
     
+    if not pre_tag.find('a'):
+        raise ValueError('Unrecognized empty listing; refusing to report success')
+
     pre_text = pre_tag.decode_contents()  # Extract content from <pre> tag
     lines = pre_text.split('\n')  # Split the content by lines
 
@@ -87,6 +112,9 @@ def parse_directory_listing(ezshare, soup):
                 link_text = link.get_text(strip=True)  # Get the link text
                 link_href = link['href']  # Get the href attribute of the link
                 
+                if '/' in link_text or '\\' in link_text or '\x00' in link_text:
+                    raise ValueError('Unsafe remote name')
+
                 # Ignore files that should be ignored or hidden
                 if link_text in ezshare.ignore or link_text.startswith('.'):
                     continue
@@ -123,16 +151,19 @@ def check_files(ezshare_instance, files, url, dir_path, total_files, processed_f
         local_path = dir_path / filename
         absolute_file_url = urllib.parse.urljoin(url, 'download?' + file_url)
         
-        if should_download(ezshare_instance, local_path, file_ts):
+        if should_download(ezshare_instance, local_path, file_ts,
+                           getattr(ezshare_instance, '_remote_sizes', {}).get((url, file_url))):
             progress_msg = f'Downloading file "{filename}" {processed_files + 1}/{total_files}'
             ezshare_instance.update_status(progress_msg + (f" ({int((processed_files + 1) / total_files * 100)}%)" if total_files else " (0%)"))
             if download_file(ezshare_instance, absolute_file_url, local_path, file_ts):
                 processed_files += 1
                 progress_value = (processed_files / total_files) * 100
                 ezshare_instance.update_progress(min(max(0, progress_value), 100))
+            else:
+                ezshare_instance.transfer_failed = True
     return processed_files
 
-def should_download(ezshare_instance, local_path, file_ts):
+def should_download(ezshare_instance, local_path, file_ts, remote_size=None):
     """
     Determine if a file should be downloaded based on its timestamp and existence.
 
@@ -141,6 +172,8 @@ def should_download(ezshare_instance, local_path, file_ts):
     :param file_ts: Timestamp of the remote file.
     :return: True if the file should be downloaded, False otherwise.
     """
+    if local_path.is_file() and remote_size is not None and local_path.stat().st_size != remote_size:
+        return True
     return not (local_path.is_file() and not (ezshare_instance.overwrite or local_path.stat().st_mtime < file_ts) and not ezshare_instance.keep_old)
 
 def download_file(ezshare_instance, url, file_path, file_ts=None):
@@ -162,14 +195,10 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
             response = ezshare_instance.session.get(url, stream=True, timeout=5)
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
-            if total_size == 0:
-                logger.warning('File %s has zero total size, skipping progress update.', str(file_path))
-                with file_path.open('wb') as f:
-                    pass
-                return True
-
-            with NamedTemporaryFile(delete=False, dir=file_path.parent) as tmp_file:
+            length = response.headers.get('content-length')
+            total_size = int(length) if length is not None else None
+            received = 0
+            with NamedTemporaryFile(delete=False, dir=file_path.parent, prefix='.ezshare-part-') as tmp_file:
                 tmp_file_path = pathlib.Path(tmp_file.name)
                 for data in response.iter_content(1024):
                     if not ezshare_instance._is_running:
@@ -177,6 +206,7 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
                         cancelled = True
                         break
                     tmp_file.write(data)
+                    received += len(data)
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
 
@@ -184,6 +214,8 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
                 tmp_file_path.unlink(missing_ok=True)
                 return False
 
+            if total_size is not None and received != total_size:
+                raise ValueError('Incomplete response body')
             tmp_file_path.replace(file_path)
             tmp_file_path = None
             logger.info('%s written', str(file_path))

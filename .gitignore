@@ -162,3 +162,8 @@ cython_debug/
 
 # mac ds store files
 *.DS_Store
+# Local server configuration, credentials and downloaded card data
+/config/
+/secrets/
+/data/
+.superpowers/

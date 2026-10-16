@@ -22,6 +22,8 @@ def build_parser():
     parser.add_argument('--config', type=pathlib.Path, help='Path to the ezShareCPAP JSON config file.')
     parser.add_argument('--path', help='Local directory where downloaded files are saved.')
     parser.add_argument('--url', help='ez Share directory URL. Defaults to the saved config value.')
+    parser.add_argument('--network-mode', choices=['managed', 'existing'], default='managed',
+                        help='Use an existing network without controlling Wi-Fi.')
     parser.add_argument('--ssid', help='ez Share Wi-Fi SSID. Defaults to the saved config value.')
     parser.add_argument('--psk', help='ez Share Wi-Fi password. Defaults to the saved config value.')
     parser.add_argument('--overwrite', action='store_true', help='Download files even when a local copy exists.')
@@ -73,7 +75,7 @@ def run_sync(args, parser=None):
     ssid = args.ssid or config_manager.get_setting('WiFi', 'ssid')
     psk = args.psk if args.psk is not None else config_manager.get_setting('WiFi', 'psk')
 
-    if not path or not url or not ssid:
+    if not path or not url or (args.network_mode == 'managed' and not ssid):
         message = 'path, url, and ssid are required. Provide them as arguments or save them in the config.'
         if parser:
             parser.error(message)
@@ -107,6 +109,7 @@ def run_sync(args, parser=None):
         config_manager.set_setting('WiFi', 'psk', psk)
 
     syncer = _get_ezshare_class()()
+    syncer.network_mode = args.network_mode
     syncer.set_status_callback(_build_status_callback(args.quiet))
     syncer.set_progress_callback(_build_progress_callback(args.quiet))
     syncer.set_params(

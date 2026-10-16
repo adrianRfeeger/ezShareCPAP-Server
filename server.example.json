@@ -1,0 +1,10 @@
+{
+  "url": "http://192.168.4.1/dir?dir=A:",
+  "root": "/data",
+  "time": "10:00",
+  "timezone": "Australia/Melbourne",
+  "timeout": 1800,
+  "attempts": 3,
+  "retry_delay": 60,
+  "run_on_startup": true
+}

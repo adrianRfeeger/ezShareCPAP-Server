@@ -5,7 +5,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from wifi_utils import ConnectionManager
-from file_ops import recursive_traversal, list_dir
+from file_ops import recursive_traversal, list_dir, should_download
 import urllib.parse
 import time
 
@@ -23,6 +23,10 @@ class ezShare:
         self.ssid = None
         self.psk = None
         self.connected = False
+        self.network_mode = 'managed'
+        self.transfer_failed = False
+        self._count_visited = set()
+        self._download_visited = set()
         self.session = None
         self.ignore = ['.', '..', 'back to photo']
         self.retries = None
@@ -79,6 +83,27 @@ class ezShare:
 
     def run(self):
         self.update_status('Starting process...')
+        if self.network_mode == 'existing':
+            self.connected = True
+            self.session = requests.Session()
+            self.session.mount('http://', HTTPAdapter(max_retries=self.retry_policy))
+            self.session.mount('https://', HTTPAdapter(max_retries=self.retry_policy))
+            try:
+                before = self.card_manifest()
+                if before is None:
+                    return False
+                success = self.run_after_connection_delay()
+                after = self.card_manifest() if success else None
+                if after != before:
+                    self.update_status('Card changed during download; retry required.', 'error')
+                    return False
+                return success
+            finally:
+                self.connected = False
+                close = getattr(self.session, 'close', None)
+                if close:
+                    close()
+
         if self.ssid:
             self.update_status(f'Connecting to {self.ssid}...')
             retries = self.retries
@@ -129,7 +154,28 @@ class ezShare:
             self.update_status('No SSID provided, cannot connect to Wi-Fi.', 'error')
             return False
 
+    def card_manifest(self):
+        pending = [self.url]
+        seen = set()
+        result = []
+        while pending and self._is_running:
+            url = pending.pop()
+            if url in seen or len(seen) >= 10000:
+                return None
+            seen.add(url)
+            files, dirs = list_dir(self, url)
+            if files is None:
+                return None
+            result.append((url, tuple(sorted(files)), tuple(sorted(dirs)),
+                           getattr(self, '_listing_fingerprints', {}).get(url, '')))
+            pending.extend(urllib.parse.urljoin(url, href) for _, href in dirs)
+        return sorted(result) if self._is_running else None
+
     def calculate_total_files(self, url, dir_path, overwrite):
+        if url in self._count_visited or len(self._count_visited) > 10000:
+            self.transfer_failed = True
+            return None
+        self._count_visited.add(url)
         files, dirs = list_dir(self, url)
         if files is None and dirs is None:
             return None
@@ -139,9 +185,12 @@ class ezShare:
         total_files = 0
         for filename, file_url, file_ts in files:
             local_path = dir_path / filename
-            if overwrite or not local_path.is_file() or local_path.stat().st_mtime < file_ts:
+            if overwrite or should_download(self, local_path, file_ts,
+                    getattr(self, '_remote_sizes', {}).get((url, file_url))):
                 total_files += 1
         for dirname, dir_url in dirs:
+            if len(dir_path.relative_to(self.path).parts) >= 100:
+                return None
             new_dir_path = dir_path / dirname
             absolute_dir_url = urllib.parse.urljoin(url, dir_url)
             nested_total = self.calculate_total_files(absolute_dir_url, new_dir_path, overwrite)
@@ -192,6 +241,8 @@ class ezShare:
             # Log a warning and proceed cautiously - but this at least differentiates a verified empty result.
             self.update_status('Directory listing is empty. Possibly no files or still an issue.', 'info')
 
+        self._count_visited = {self.url}
+        self._download_visited = set()
         self.total_files = self.calculate_total_files_from_listing(
             test_files,
             test_dirs,
@@ -201,7 +252,7 @@ class ezShare:
         )
         if self.total_files is None:
             self.update_status('Unable to count files because the ez Share directory could not be reached.', 'error')
-            return
+            return False
         self.update_status(f'Total files to sync: {self.total_files}')
 
         if self.total_files == 0:
@@ -213,7 +264,7 @@ class ezShare:
         self.processed_files = recursive_traversal(
             self, self.url, self.path, self.total_files, self.processed_files, lambda: self._is_running
         )
-        if self.processed_files == self.total_files:
+        if self._is_running and not self.transfer_failed and self.processed_files == self.total_files:
             self.update_status('File transfer completed successfully.')
             return True
         else:
@@ -223,7 +274,7 @@ class ezShare:
     def stop(self):
         self._is_running = False
         self.update_status('Process stopped by user.', 'info')
-        if self.connected:
+        if self.connected and self.network_mode == 'managed':
             if self.connection_manager.disconnect(self.ssid):
                 self.connected = False
             else:
