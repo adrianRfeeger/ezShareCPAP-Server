@@ -126,7 +126,8 @@ def import_seed_zip(zip_path, root):
                     state['imported']+=1
                 if time.monotonic()-last_write>0.5:
                     server.atomic_json(record,state);last_write=time.monotonic()
-            state.update(phase='completed',action='Local files imported. Sync to fetch missing or changed files.')
+            state.update(completed_at=datetime.now(timezone.utc).isoformat(),phase='completed',action='Local files imported. Sync to fetch missing or changed files.')
+            storage.refresh_inventory(root)
             return {'imported':state['imported'],'kept':state['kept']}
         except (OSError,ValueError,RuntimeError,zipfile.BadZipFile) as exc:
             state.update(phase='failed',error=str(exc),action='Import failed')

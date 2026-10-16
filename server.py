@@ -120,7 +120,7 @@ def run_is_active(root):
     return False
 
 
-def read_live_state(root):
+def _read_live_state(root):
     status = read_state(root)
     status['busy'] = run_is_active(root)
     status['storage'] = storage.storage_status(root)
@@ -145,6 +145,25 @@ def read_live_state(root):
                     'action': 'Sync in progress. Live details will appear on the next run.'
                     if status.get('running') else 'No sync is running.'}
     status['progress'] = progress
+    return status
+
+
+def read_live_state(root):
+    status=_read_live_state(root)
+    imported=status.get('import_status',{})
+    published=Path(root)/'published/current'
+    ready=published.is_symlink() and published.resolve().parent==(Path(root)/'published').resolve() and published.is_dir()
+    working=status.get('storage',{}).get('working_files')
+    status['archive']={'working_files':working,'last_import_added':imported.get('imported'),
+        'last_import_kept':imported.get('kept'),'last_import_at':imported.get('completed_at'),
+        'published_files':status.get('files') if ready else None,'published_at':status.get('last_success') if ready else None}
+    status['availability']=('ready_syncing' if status.get('running') else 'ready') if ready else (
+        'first_sync' if status.get('running') else 'interrupted_pending' if status.get('progress',{}).get('phase')=='interrupted' else
+        'seeded_pending' if imported.get('imported',0)>0 else 'empty')
+    progress=status['progress']
+    total=progress.get('files_total');done=progress.get('files_done',0) or 0;card=progress.get('card_files')
+    progress['inventory']={'card_files':card,'reused_files':max(0,card-total) if card is not None and total is not None else None,
+        'download_required':total,'downloaded':done if total is not None else None,'remaining':max(0,total-done) if total is not None else None}
     return status
 
 
@@ -232,7 +251,7 @@ def run_once(cfg, download=download_archive, schedule_date=None):
             if schedule_date and status.get('last_scheduled_date', '') >= schedule_date:
                 return 0
             started = time.monotonic()
-            status.update(last_attempt=datetime.now(timezone.utc).isoformat(), running=True)
+            status.update(last_attempt=datetime.now(timezone.utc).isoformat(), running=True,error=None)
             if schedule_date:
                 status['last_scheduled_date'] = schedule_date
             atomic_json(root / 'state/status.json', status)
@@ -309,7 +328,7 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                 status['history'] = (status.get('history', []) + [{
                     'finished': datetime.now(timezone.utc).isoformat(),
                     'result': 'Success' if return_code == 0 else 'Failed',
-                    'duration_seconds': status['duration_seconds']}])[-20:]
+                    'duration_seconds': status['duration_seconds'], 'error':status.get('error')}])[-20:]
                 atomic_json(root / 'state/status.json', status)
             return return_code
     except BlockingIOError:

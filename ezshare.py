@@ -197,6 +197,7 @@ class ezShare:
 
     def calculate_total_files_from_listing(self, files, dirs, url, dir_path, overwrite):
         total_files = 0
+        self.card_files = getattr(self,'card_files',0)+len(files)
         for filename, file_url, file_ts in files:
             local_path = local_case_path(dir_path / filename)
             if overwrite or should_download(self, local_path, file_ts,
@@ -256,6 +257,7 @@ class ezShare:
             # Log a warning and proceed cautiously - but this at least differentiates a verified empty result.
             self.update_status('Directory listing is empty. Possibly no files or still an issue.', 'info')
 
+        self.card_files = 0
         self._count_visited = {self.url}
         self._download_visited = set()
         self.total_files = self.calculate_total_files_from_listing(
@@ -270,13 +272,14 @@ class ezShare:
             return False
         self.update_status(f'Total files to sync: {self.total_files}')
 
+        self.activity('planning','Card inventory ready',card_files=self.card_files,files_total=self.total_files,files_done=0)
         if self.total_files == 0:
             self.update_status('All files are up to date. No files to sync. Process completed.')
             if self.progress_callback:
                 self.progress_callback('no_files')
             return True
 
-        self.activity('downloading', 'Downloading files', files_done=0, files_total=self.total_files)
+        self.activity('downloading', 'Downloading files', files_done=0, files_total=self.total_files,card_files=self.card_files)
         self.processed_files = recursive_traversal(
             self, self.url, self.path, self.total_files, self.processed_files, lambda: self._is_running
         )
