@@ -73,6 +73,66 @@ def read_state(root):
     return json.loads(path.read_text())
 
 
+class ProgressWriter:
+    def __init__(self, root, run_id):
+        self.root = root
+        self.run_id = run_id
+        self.frame = {}
+        self.last_write = 0
+
+    def __call__(self, event, force=False):
+        if event.get('phase') != self.frame.get('phase'):
+            self.frame = {'files_done': None, 'files_total': None, 'percent': None,
+                          'current_file': '', 'file_bytes': None, 'file_size': None}
+            force = True
+        self.frame.update(event, run_id=self.run_id, updated_at=datetime.now(timezone.utc).isoformat())
+        done, total = self.frame.get('files_done'), self.frame.get('files_total')
+        if self.frame.get('phase') == 'downloading' and total and done is not None:
+            self.frame['percent'] = round(min(100, max(0, done / total * 100)), 1)
+        elif self.frame.get('phase') != 'completed':
+            self.frame['percent'] = None
+        now = time.monotonic()
+        if force or now - self.last_write >= 0.25:
+            try:
+                atomic_json(self.root / 'state/progress.json', self.frame)
+            except OSError:
+                log.warning('Could not save live progress', exc_info=True)
+            self.last_write = now
+
+
+def run_is_active(root):
+    try:
+        with (root / 'state/sync.lock').open('r') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    except FileNotFoundError:
+        pass
+    return False
+
+
+def read_live_state(root):
+    status = read_state(root)
+    if status.get('running') and not run_is_active(root):
+        status.update(running=False, error='Previous sync stopped before completion. Run Sync now to retry.')
+        status['progress'] = {'phase':'interrupted', 'percent':None,
+                              'action':'Previous sync was interrupted.'}
+        return status
+    progress = {}
+    try:
+        progress = json.loads((root / 'state/progress.json').read_text())
+    except (OSError, ValueError):
+        pass
+    if not progress or progress.get('run_id') != status.get('last_attempt'):
+        progress = {'phase': 'waiting' if status.get('running') else 'idle', 'percent': None,
+                    'action': 'Sync in progress. Live details will appear on the next run.'
+                    if status.get('running') else 'No sync is running.'}
+    status['progress'] = progress
+    return status
+
+
 @contextmanager
 def run_lock(state):
     state.mkdir(parents=True, exist_ok=True)
@@ -88,7 +148,8 @@ def download_archive(work, cfg):
     global CHILD
     CHILD = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
                               '--config', cfg['_config_path'], 'download'],
-                             start_new_session=True)
+                             start_new_session=True,
+                             env=dict(os.environ, EZSHARE_RUN_ID=cfg['_run_id']))
     try:
         return CHILD.wait(timeout=cfg['timeout']) == 0 and not STOP.is_set()
     except subprocess.TimeoutExpired:
@@ -110,6 +171,7 @@ def download_child(cfg):
     from ezshare import ezShare
     app = ezShare()
     ACTIVE_APP = app
+    app.activity_callback = ProgressWriter(Path(cfg['root']), os.environ.get('EZSHARE_RUN_ID', ''))
     app.network_mode = 'existing'
     app.set_params(str(Path(cfg['root']) / 'work/archive'), cfg['url'], None,
                    False, True, False, False, None, None, [], 3, 5, False)
@@ -153,12 +215,15 @@ def run_once(cfg, download=download_archive, schedule_date=None):
             if schedule_date:
                 status['last_scheduled_date'] = schedule_date
             atomic_json(root / 'state/status.json', status)
+            progress = ProgressWriter(root, status['last_attempt'])
+            progress({'phase': 'starting', 'action': 'Starting sync'}, force=True)
             work = root / 'work/archive'
             work.mkdir(parents=True, exist_ok=True)
             for leftover in work.rglob('.ezshare-part-*'):
                 if leftover.is_file():
                     leftover.unlink()
             staging = None
+            return_code = 1
             try:
                 success = False
                 deadline = started + cfg['timeout']
@@ -168,12 +233,15 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
-                    attempt_cfg = dict(cfg, timeout=remaining)
+                    attempt_cfg = dict(cfg, timeout=remaining, _run_id=status['last_attempt'])
+                    progress({'phase': 'starting', 'action': f'Starting download attempt {attempt + 1}'}, force=True)
                     if download(work, attempt_cfg):
                         success = True
                         break
-                    if attempt + 1 < cfg['attempts'] and STOP.wait(min(cfg['retry_delay'], max(0, deadline-time.monotonic()))):
-                        break
+                    if attempt + 1 < cfg['attempts']:
+                        progress({'phase': 'retrying', 'action': 'Waiting before retrying the card'}, force=True)
+                        if STOP.wait(min(cfg['retry_delay'], max(0, deadline-time.monotonic()))):
+                            break
                 if not success or STOP.is_set():
                     raise RuntimeError('Download failed, timed out, or was stopped; previous snapshot retained')
                 published = root / 'published'
@@ -184,6 +252,7 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                 name = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
                 staging = published / ('.staging-' + name)
                 # Copies, never hard links: later downloads cannot mutate a published snapshot.
+                progress({'phase': 'publishing', 'action': 'Preparing the completed snapshot'}, force=True)
                 copy_archive(work, staging, deadline)
                 count = 0
                 for item in staging.rglob('*'):
@@ -200,10 +269,12 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                 pointer.replace(published / 'current')
                 status.update(last_success=datetime.now(timezone.utc).isoformat(),
                               snapshot=name, files=count, error=None)
+                progress({'phase': 'completed', 'action': 'Sync completed. Snapshot ready for OSCAR.', 'percent': 100}, force=True)
                 return_code = 0
             except Exception as exc:
                 log.exception('Sync failed')
                 status['error'] = str(exc)
+                progress({'phase': 'failed', 'action': str(exc)}, force=True)
                 return_code = 1
             finally:
                 if staging and staging.exists():

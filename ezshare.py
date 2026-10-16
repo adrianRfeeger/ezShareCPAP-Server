@@ -32,6 +32,8 @@ class ezShare:
         self.retries = None
         self.connection_delay = None
         self.debug = None
+        self.activity_callback = None
+        self.activity_phase = "scanning"
         self.progress_callback = None
         self.status_callback = None
         self.total_files = 0
@@ -67,6 +69,11 @@ class ezShare:
     def set_status_callback(self, callback):
         self.status_callback = callback
 
+    def activity(self, phase, action, **values):
+        self.activity_phase = phase or self.activity_phase
+        if self.activity_callback:
+            self.activity_callback(dict(phase=self.activity_phase, action=action, **values))
+
     def update_progress(self, value):
         if self.progress_callback:
             self.progress_callback(min(max(0, value), 100))
@@ -89,10 +96,13 @@ class ezShare:
             self.session.mount('http://', HTTPAdapter(max_retries=self.retry_policy))
             self.session.mount('https://', HTTPAdapter(max_retries=self.retry_policy))
             try:
+                self.activity('scanning', 'Scanning card directories')
                 before = self.card_manifest()
                 if before is None:
                     return False
                 success = self.run_after_connection_delay()
+                if success:
+                    self.activity('verifying', 'Checking the card for changes')
                 after = self.card_manifest() if success else None
                 if after != before:
                     self.update_status('Card changed during download; retry required.', 'error')
@@ -158,6 +168,7 @@ class ezShare:
         pending = [self.url]
         seen = set()
         result = []
+        found_files = 0
         while pending and self._is_running:
             url = pending.pop()
             if url in seen or len(seen) >= 10000:
@@ -166,6 +177,9 @@ class ezShare:
             files, dirs = list_dir(self, url)
             if files is None:
                 return None
+            found_files += len(files)
+            self.activity(None, 'Reading card directories', directories_scanned=len(seen),
+                          files_found=found_files)
             result.append((url, tuple(sorted(files)), tuple(sorted(dirs)),
                            getattr(self, '_listing_fingerprints', {}).get(url, '')))
             pending.extend(urllib.parse.urljoin(url, href) for _, href in dirs)
@@ -229,6 +243,7 @@ class ezShare:
         self.path.mkdir(parents=True, exist_ok=True)
         self.update_status(f'Using path: {self.path}')
         self.update_status('Scanning for files to download...')
+        self.activity('planning', 'Counting files to download')
 
         # Test directory listing to ensure we're truly connected
         test_files, test_dirs = self.wait_for_directory_listing()
@@ -261,6 +276,7 @@ class ezShare:
                 self.progress_callback('no_files')
             return True
 
+        self.activity('downloading', 'Downloading files', files_done=0, files_total=self.total_files)
         self.processed_files = recursive_traversal(
             self, self.url, self.path, self.total_files, self.processed_files, lambda: self._is_running
         )

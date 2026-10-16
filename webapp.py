@@ -8,7 +8,7 @@ import signal
 import threading
 import time
 
-from flask import Flask, abort, redirect, render_template, request, session
+from flask import Flask, abort, redirect, render_template, request, session, jsonify
 from waitress import create_server
 import server
 
@@ -57,9 +57,13 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
     @app.get('/')
     def index():
         cfg = config()
-        status = server.read_state(Path(cfg['root']))
+        status = server.read_live_state(Path(cfg['root']))
         return render_template('index.html', cfg=cfg, status=status, csrf=session['csrf'],
                                notice=request.args.get('notice', ''))
+
+    @app.get('/api/status')
+    def live_status():
+        return jsonify(server.read_live_state(Path(config()['root'])))
 
     @app.post('/settings')
     def settings():
@@ -93,7 +97,7 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
         workers[:] = [thread for thread in workers if thread.is_alive()]
         workers.append(worker)
         worker.start()
-        return redirect('/?notice=Sync+requested.+Refresh+to+see+progress.', code=303)
+        return redirect('/?notice=Sync+requested.+Progress+will+appear+below.', code=303)
 
     if start_scheduler:
         scheduler = threading.Thread(target=lambda: server.serve(config()), daemon=True)

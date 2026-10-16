@@ -48,6 +48,9 @@ def list_dir(ezshare, url):
     :return: Tuple of (files, directories).
     """
     try:
+        if hasattr(ezshare, 'activity'):
+            directory = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get('dir', ['card'])[0]
+            ezshare.activity(None, f'Reading directory {directory}')
         response = ezshare.session.get(url, timeout=5)
         response.raise_for_status()
         soup = bs4.BeautifulSoup(response.text, 'html.parser')
@@ -153,10 +156,17 @@ def check_files(ezshare_instance, files, url, dir_path, total_files, processed_f
         
         if should_download(ezshare_instance, local_path, file_ts,
                            getattr(ezshare_instance, '_remote_sizes', {}).get((url, file_url))):
+            if hasattr(ezshare_instance, 'activity'):
+                ezshare_instance.activity('downloading', f'Downloading {filename}',
+                                          current_file=filename, files_done=processed_files,
+                                          files_total=total_files, file_bytes=0, file_size=None)
             progress_msg = f'Downloading file "{filename}" {processed_files + 1}/{total_files}'
             ezshare_instance.update_status(progress_msg + (f" ({int((processed_files + 1) / total_files * 100)}%)" if total_files else " (0%)"))
             if download_file(ezshare_instance, absolute_file_url, local_path, file_ts):
                 processed_files += 1
+                if hasattr(ezshare_instance, 'activity'):
+                    ezshare_instance.activity('downloading', 'Downloading files', current_file='',
+                                              files_done=processed_files, files_total=total_files)
                 progress_value = (processed_files / total_files) * 100
                 ezshare_instance.update_progress(min(max(0, progress_value), 100))
             else:
@@ -207,6 +217,10 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
                         break
                     tmp_file.write(data)
                     received += len(data)
+                    if hasattr(ezshare_instance, 'activity'):
+                        ezshare_instance.activity('downloading', f'Downloading {file_path.name}',
+                                                  current_file=file_path.name, file_bytes=received,
+                                                  file_size=total_size)
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
 

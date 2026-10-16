@@ -45,3 +45,12 @@ def test_first_post_cannot_use_predictable_missing_token(app):
     client = app.test_client()
     assert client.post('/settings', headers=auth(), data={
         'csrf': 'missing', 'time': '11:00', 'timezone': 'Australia/Melbourne'}).status_code == 403
+
+
+def test_live_status_api_requires_authentication(app):
+    client = app.test_client()
+    assert client.get('/api/status').status_code == 401
+    response = client.get('/api/status', headers=auth())
+    assert response.status_code == 200
+    assert response.json['progress']['percent'] is None
+    assert response.headers['Cache-Control'] == 'no-store'
