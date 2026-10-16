@@ -19,6 +19,7 @@ import uuid
 import storage
 import run_control
 import scheduling
+import diagnostics
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
@@ -105,6 +106,8 @@ class ProgressWriter:
         self.root = root
         self.run_id = run_id
         self.frame = {}
+        self.rate=diagnostics.TransferRate()
+        self.transfer={}
         self.last_write = 0
 
     def __call__(self, event, force=False):
@@ -113,6 +116,11 @@ class ProgressWriter:
                           'current_file': '', 'file_bytes': None, 'file_size': None}
             force = True
         self.frame.update(event, run_id=self.run_id, updated_at=datetime.now(timezone.utc).isoformat())
+        if 'file_bytes' in event and event['file_bytes'] is not None:
+            metrics=self.rate.observe(self.run_id,event.get('current_file',self.frame.get('current_file','')),event['file_bytes'])
+            if not metrics['last_activity_at']:metrics['last_activity_at']=self.transfer.get('last_activity_at')
+            self.transfer=metrics
+        self.frame['transfer']=self.transfer
         done, total = self.frame.get('files_done'), self.frame.get('files_total')
         if self.frame.get('phase') == 'downloading' and total and done is not None:
             self.frame['percent'] = round(min(100, max(0, done / total * 100)), 1)

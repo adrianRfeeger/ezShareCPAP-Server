@@ -1,0 +1,4 @@
+services:
+  downloader:
+    volumes:
+      - ./diagnostics:/diagnostics:ro

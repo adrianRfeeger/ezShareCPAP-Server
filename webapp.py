@@ -3,6 +3,7 @@ import base64
 import storage
 import run_control
 import scheduling
+import diagnostics
 from datetime import datetime,timezone
 import upload_server
 import hashlib
@@ -64,6 +65,9 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
 
     def live_state():
         cfg=config();state=server.read_live_state(root)
+        state['diagnostics']={'wifi':diagnostics.read_wifi_status('/diagnostics/wifi.json',datetime.now(timezone.utc))}
+        try:state['diagnostics']['card']=__import__('json').loads((root/'state/card-check.json').read_text())
+        except (OSError,ValueError):state['diagnostics']['card']={}
         state['schedule']=scheduling.schedule_status(datetime.now(timezone.utc),cfg,state)
         return state
 
@@ -135,6 +139,16 @@ exit "$result"
     @app.get('/api/status')
     def live_status():
         return jsonify(live_state())
+
+    @app.post('/diagnostics/check')
+    def card_check():
+        try:
+            with server.run_lock(root/'state'):
+                path=root/'state/card-check.json'
+                if path.exists() and time.time()-path.stat().st_mtime<30:return 'Wait 30 seconds between checks',429
+                server.atomic_json(path,diagnostics.check_card(config()))
+            return redirect('/?notice=Connection+check+finished',303)
+        except BlockingIOError:return 'Connection checks are available while sync and import are idle.',409
 
     @app.get('/api/schedule/preview')
     def preview_schedule():

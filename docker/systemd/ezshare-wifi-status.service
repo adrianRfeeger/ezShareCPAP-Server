@@ -1,0 +1,10 @@
+[Unit]
+Description=Read ezShare Wi-Fi link status
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/ezsharecpap/scripts/collect_wifi_status.py --interface wlp1s0 --output /opt/ezsharecpap/diagnostics/wifi.json
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/ezsharecpap/diagnostics
