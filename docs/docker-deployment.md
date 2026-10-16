@@ -8,7 +8,20 @@ Use a dedicated Debian LXC with a LAN interface on `vmbr0` and the unused Wi-Fi 
 
 Docker inside an unprivileged LXC needs the relevant nesting/keyctl features. Confirm the actual wireless-interface or PHY assignment method for this hardware; adding a generic device entry does not establish Wi-Fi control. Keep the host Ethernet connection and management route unchanged. A dedicated VM remains the fallback if the LXC cannot run this configuration with the intended isolation.
 
-Configure only the assigned wireless interface to join the ez Share access point. Keep the LAN as the default route and DNS source. The wireless interface should route the card subnet only. Confirm the LXC can reach `http://192.168.4.1/dir?dir=A:` and still reach the LAN. Verify recovery after the card loses power and the LXC restarts.
+Install `iw` on the Proxmox host before starting an LXC with a physical wireless interface assigned; LXC uses it to move the wireless device. Keep the host kernel driver loaded. The tested RTL8822CE card uses `rtw88_8822ce`.
+
+Configure only the assigned wireless interface to join the ez Share access point. Keep the LAN as the default route and DNS source. With an unmanaged LAN interface, prevent NetworkManager from overwriting resolv.conf with an empty file. The tested configuration in `/etc/NetworkManager/conf.d/10-ezshare-lan.conf` is:
+
+```ini
+[main]
+dns=none
+[keyfile]
+unmanaged-devices=interface-name:eth0
+```
+
+Set the LXC DNS server through Proxmox and verify `/etc/resolv.conf` contains it. Reload NetworkManager after changing its configuration. Configure the card connection with `ipv4.never-default=yes`, `ipv4.ignore-auto-dns=yes`, and IPv6 disabled if the card does not use it.
+
+Keep the LAN as the default route and DNS source. The wireless interface should route the card subnet only. Confirm the LXC can reach `http://192.168.4.1/dir?dir=A:` and still reach the LAN. Verify recovery after the card loses power and the LXC restarts.
 
 The web interface does not configure Wi-Fi. This remains an LXC administration task.
 
@@ -21,6 +34,8 @@ mkdir -p config secrets data/state data/work data/published
 cp server.example.json config/server.json
 cp .env.example .env
 ```
+
+Reserve the LXC address in your router's DHCP configuration, or use a verified static address, before relying on unattended service startup. Compose binds ports to this address.
 
 Edit `.env` to set `LAN_IP` to the dedicated LXC's LAN address, not the Proxmox host address. Use the downloader account's numeric UID/GID for `PUID` and `PGID`; the defaults are 1000/1000. Ensure that account can write `config` and `data`. For those defaults:
 
