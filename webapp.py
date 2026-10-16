@@ -1,6 +1,7 @@
 """Password-protected LAN controls for the downloader."""
 import base64
 import storage
+import run_control
 import upload_server
 import hashlib
 import hmac
@@ -222,14 +223,24 @@ exit "$result"
             temporary.unlink(missing_ok=True)
         return redirect('/?notice=Schedule+saved', code=303)
 
+    @app.post('/sync/stop')
+    def stop_sync():
+        try:run_control.request_stop(root,request.form.get('run_id',''))
+        except ValueError as exc:return str(exc),409
+        return redirect('/?notice=Stopping+after+the+current+file',303)
+
+    @app.post('/sync/resume')
     @app.post('/sync')
     def sync():
         if not action_lock.acquire(blocking=False):
             return redirect('/?notice=A+manual+sync+is+already+running', code=303)
         cfg = config()
+        resume=request.path=='/sync/resume'
+        if server.run_is_active(root):
+            action_lock.release();return 'A sync or import is already running',409
         def work():
             try:
-                server.run_once(cfg)
+                server.run_once(cfg,resume=resume)
             finally:
                 action_lock.release()
         worker = threading.Thread(target=work, daemon=True)

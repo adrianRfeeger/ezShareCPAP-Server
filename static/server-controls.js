@@ -2,6 +2,10 @@ import {availabilityMessage} from './status-view.mjs';
 const el = id => document.getElementById(id);
 const size = value => value == null ? 'calculating' : `${(value / 1024 ** 3).toFixed(2)} GiB`;
 window.addEventListener('sync-state', ({detail: state}) => {
+  el('stop-run-id').value = state.last_attempt || '';
+  el('stop-button').disabled = !state.running || state.run_state === 'stop_requested';
+  el('resume-button').disabled = !state.resume_available;
+  el('pause-status').textContent = state.run_state === 'stop_requested' ? 'Stopping after the current file…' : state.paused ? 'Scheduled runs are paused. Select Resume to continue.' : '';
   el('availability-message').textContent = availabilityMessage(state);
   const archive = state.archive || {};
   const inv = state.progress?.inventory || {};

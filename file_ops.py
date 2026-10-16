@@ -50,6 +50,9 @@ def recursive_traversal(ezshare_instance, url, dir_path, total_files, processed_
     return processed_files
 
 def list_dir(ezshare, url):
+    if getattr(ezshare,'should_stop',lambda:False)():
+        ezshare._is_running=False
+        return None,None
     """
     Fetch and parse directory listing from the given URL.
 
@@ -157,7 +160,8 @@ def check_files(ezshare_instance, files, url, dir_path, total_files, processed_f
     :return: Updated count of processed files.
     """
     for filename, file_url, file_ts in files:
-        if not is_running():
+        if not is_running() or getattr(ezshare_instance,'should_stop',lambda:False)():
+            ezshare_instance._is_running=False
             ezshare_instance.update_status('Process cancelled.', 'info')
             break
 
@@ -208,7 +212,9 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
     """
     max_retries = ezshare_instance.retries
     retries = max_retries
+    file_deadline=time.monotonic()+300
     while retries > 0:
+        if getattr(ezshare_instance,'should_stop',lambda:False)():return False
         tmp_file_path = None
         cancelled = False
         try:
@@ -221,6 +227,7 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
             with NamedTemporaryFile(delete=False, dir=file_path.parent, prefix='.ezshare-part-') as tmp_file:
                 tmp_file_path = pathlib.Path(tmp_file.name)
                 for data in response.iter_content(1024):
+                    if time.monotonic()>=file_deadline:raise TimeoutError('File transfer exceeded five minutes')
                     if not ezshare_instance._is_running:
                         logger.info('Cancelling download of %s', str(file_path))
                         cancelled = True
@@ -269,7 +276,8 @@ def check_dirs(ezshare_instance, dirs, url, dir_path, total_files, processed_fil
     :return: Updated count of processed files.
     """
     for dirname, dir_url in dirs:
-        if not is_running():
+        if not is_running() or getattr(ezshare_instance,'should_stop',lambda:False)():
+            ezshare_instance._is_running=False
             ezshare_instance.update_status('Process cancelled.', 'info')
             break
 

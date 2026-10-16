@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 import storage
+import run_control
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ def load_config(path):
             cfg.setdefault(name, default)
             if type(cfg[name]) is not int or not low <= cfg[name] <= high:
                 raise ValueError(f'{name} must be an integer from {low} to {high}')
+        cfg.setdefault('resume_interrupted',True)
+        cfg.setdefault('initial_sync_timeout',86400)
+        if type(cfg['resume_interrupted']) is not bool: raise ValueError('resume_interrupted must be boolean')
+        if type(cfg['initial_sync_timeout']) is not int or not 1<=cfg['initial_sync_timeout']<=86400: raise ValueError('Initial sync timeout must be 1..86400 seconds')
         cfg.setdefault('retention_enabled',False)
         cfg.setdefault('retention_keep',2)
         cfg.setdefault('storage_reserve_bytes',storage.RESERVE_BYTES)
@@ -164,6 +169,10 @@ def read_live_state(root):
     total=progress.get('files_total');done=progress.get('files_done',0) or 0;card=progress.get('card_files')
     progress['inventory']={'card_files':card,'reused_files':max(0,card-total) if card is not None and total is not None else None,
         'download_required':total,'downloaded':done if total is not None else None,'remaining':max(0,total-done) if total is not None else None}
+    control=run_control.read_control(root)
+    status['paused']=bool(control.get('paused'))
+    status['run_state']=('stop_requested' if status.get('running') and control.get('stop_run_id')==status.get('last_attempt') else 'running' if status.get('running') else 'paused' if status['paused'] else 'interrupted' if status['progress'].get('phase')=='interrupted' else status.get('run_state') or ('failed' if status.get('error') else 'completed' if ready else 'idle'))
+    status['resume_available']=not status['busy'] and status['run_state'] in ('paused','interrupted','failed')
     return status
 
 
@@ -207,6 +216,7 @@ def download_child(cfg):
     ACTIVE_APP = app
     app.activity_callback = ProgressWriter(Path(cfg['root']), os.environ.get('EZSHARE_RUN_ID', ''))
     app.network_mode = 'existing'
+    app.should_stop=lambda:run_control.stop_requested(Path(cfg['root']),os.environ.get('EZSHARE_RUN_ID',''))
     app.set_params(str(Path(cfg['root']) / 'work/archive'), cfg['url'], None,
                    False, True, False, False, None, None, [], 3, 5, False)
     app.set_status_callback(lambda message, kind='info': log.log(
@@ -220,7 +230,7 @@ def copy_archive(source, destination, deadline):
 
 def _copy_archive(source,destination,deadline,lease):
     def check():
-        if STOP.is_set() or time.monotonic() >= deadline:
+        if STOP.is_set() or run_control.stop_requested(source.parents[1],read_state(source.parents[1]).get('last_attempt')) or time.monotonic() >= deadline:
             raise RuntimeError('Stopped or timed out while building snapshot')
     def copy_file(src, dst):
         check()
@@ -243,7 +253,7 @@ def _copy_archive(source,destination,deadline,lease):
     check()
 
 
-def run_once(cfg, download=download_archive, schedule_date=None):
+def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, resume=False):
     root = Path(cfg['root'])
     try:
         with run_lock(root / 'state'):
@@ -251,7 +261,11 @@ def run_once(cfg, download=download_archive, schedule_date=None):
             if schedule_date and status.get('last_scheduled_date', '') >= schedule_date:
                 return 0
             started = time.monotonic()
-            status.update(last_attempt=datetime.now(timezone.utc).isoformat(), running=True,error=None)
+            with run_control.control_lock(root):
+                if run_control.read_control(root).get('paused') and not resume:return 75
+                if resume:run_control.clear_pause(root)
+                status.update(last_attempt=datetime.now(timezone.utc).isoformat(), running=True,error=None,run_state='running')
+                atomic_json(root / 'state/status.json', status)
             if schedule_date:
                 status['last_scheduled_date'] = schedule_date
             atomic_json(root / 'state/status.json', status)
@@ -266,9 +280,10 @@ def run_once(cfg, download=download_archive, schedule_date=None):
             return_code = 1
             try:
                 success = False
-                deadline = started + cfg['timeout']
+                initial=not (root/'published/current').exists()
+                deadline = started + (cfg.get('initial_sync_timeout',cfg['timeout']) if initial else cfg['timeout'])
                 for attempt in range(cfg['attempts']):
-                    if STOP.is_set():
+                    if STOP.is_set() or run_control.stop_requested(root,status['last_attempt']):
                         break
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -280,8 +295,11 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                         break
                     if attempt + 1 < cfg['attempts']:
                         progress({'phase': 'retrying', 'action': 'Waiting before retrying the card'}, force=True)
-                        if STOP.wait(min(cfg['retry_delay'], max(0, deadline-time.monotonic()))):
-                            break
+                        retry_end=min(deadline,time.monotonic()+cfg['retry_delay'])
+                        while time.monotonic()<retry_end and not STOP.wait(min(.25,max(0,retry_end-time.monotonic()))):
+                            if run_control.stop_requested(root,status['last_attempt']):break
+                if run_control.stop_requested(root,status['last_attempt']):
+                    raise InterruptedError('Sync stopped. Resume when ready; scheduled runs are paused.')
                 if not success or STOP.is_set():
                     raise RuntimeError('Download failed, timed out, or was stopped; previous snapshot retained')
                 published = root / 'published'
@@ -312,22 +330,27 @@ def run_once(cfg, download=download_archive, schedule_date=None):
                               snapshot=name, files=count, error=None)
                 progress({'phase': 'completed', 'action': 'Sync completed. Snapshot ready for OSCAR.', 'percent': 100}, force=True)
                 return_code = 0
+                status['run_state']='completed'
                 if cfg.get('retention_enabled'):
                     try: storage.prune_snapshots(root,cfg.get('retention_keep',2))
                     except (OSError,ValueError) as exc: status['storage_warning']=str(exc)
                 storage.refresh_inventory(root)
             except Exception as exc:
-                log.exception('Sync failed')
-                status['error'] = str(exc)
-                progress({'phase': 'failed', 'action': str(exc)}, force=True)
-                return_code = 1
+                paused=run_control.stop_requested(root,status['last_attempt'])
+                interrupted=STOP.is_set()
+                status['run_state']='paused' if paused else 'interrupted' if interrupted else 'failed'
+                status['error']=None if paused else str(exc)
+                progress({'phase':status['run_state'],'action': 'Sync stopped. Scheduled runs are paused until Resume.' if paused else str(exc)},force=True)
+                if not paused:log.exception('Sync failed or interrupted')
+                return_code=0 if paused else 1
             finally:
                 if staging and staging.exists():
                     shutil.rmtree(staging)
                 status.update(running=False, duration_seconds=round(time.monotonic()-started, 2))
                 status['history'] = (status.get('history', []) + [{
                     'finished': datetime.now(timezone.utc).isoformat(),
-                    'result': 'Success' if return_code == 0 else 'Failed',
+                    'result': 'Stopped' if status.get('run_state')=='paused' else 'Interrupted' if status.get('run_state')=='interrupted' else 'Success' if return_code==0 else 'Failed',
+                    'trigger':trigger or ('scheduled' if schedule_date else 'manual'),'schedule_date':schedule_date,
                     'duration_seconds': status['duration_seconds'], 'error':status.get('error')}])[-20:]
                 atomic_json(root / 'state/status.json', status)
             return return_code
@@ -351,10 +374,14 @@ def scheduled_date(now, cfg, last_date):
 def serve(cfg):
     root = Path(cfg['root'])
     atomic_json(root / 'state/heartbeat.json', {'time': time.time()})
-    if cfg['run_on_startup']:
-        due = scheduled_date(datetime.now(timezone.utc), cfg,
-                             read_state(root).get('last_scheduled_date'))
-        run_once(cfg, schedule_date=due)
+    previous=read_state(root)
+    recovery=run_control.recovery_decision(root,previous,cfg)
+    if recovery=='resume':
+        due=scheduled_date(datetime.now(timezone.utc),cfg,previous.get('last_scheduled_date'))
+        run_once(cfg,schedule_date=due,trigger='recovery')
+    elif cfg['run_on_startup'] and recovery!='paused':
+        due=scheduled_date(datetime.now(timezone.utc),cfg,previous.get('last_scheduled_date'))
+        run_once(cfg,schedule_date=due)
     while not STOP.is_set():
         if cfg.get('_config_path'):
             try:
@@ -407,7 +434,7 @@ def main():
         heartbeat = json.loads((root / 'state/heartbeat.json').read_text())
         status = read_state(root)
         # During a download the child is bounded; allow its retry window.
-        allowed = cfg['timeout'] + 120
+        allowed = max(cfg['timeout'],cfg.get('initial_sync_timeout',cfg['timeout'])) + 120
         return 0 if time.time() - heartbeat['time'] < allowed else 1
     except (ValueError, OSError) as exc:
         log.error('%s', exc)
