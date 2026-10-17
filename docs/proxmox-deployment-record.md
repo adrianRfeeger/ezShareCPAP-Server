@@ -67,4 +67,12 @@ Independent review identified cancelled-upload lease cleanup, stale recovery adm
 
 Rendered local browser checks passed at desktop and 390-pixel width with no JavaScript exceptions or horizontal overflow. Schedule preview works and polling preserves unsaved time edits. Browser plugin was unavailable; checks used the installed Playwright runtime. Finder protocol handoff and OSCAR import remain owner acceptance checks.
 
-Deployment is pending a renewed Tailscale SSH authentication check. No new image, collector or retention setting has been applied to CT 114 in this implementation run yet. The last observed production image remains the prior release; recheck live state before deployment.
+After the owner renewed Tailscale authentication, the update was built and deployed in CT 114. Source revision ef630b5 produced image sha256:a72deb287ade3b4e42a814645da4fdf601a585ab797e1c17a90e2deda616d111. The previous image is retained as ezsharecpap-downloader:before-reliability, and configuration/state backups are under /root/ezshare-reliability-backup in the guest.
+
+A restricted-container smoke test with separate synthetic data passed publication, ZIP export, authentication and old-configuration loading. The production downloader is healthy. The existing startup-sync setting was true, so service startup initiated a sync; the previous 9,473-file completed snapshot stayed available throughout. Automatic retention remains disabled, with all existing snapshots preserved.
+
+The optional Wi-Fi collector timer is active inside CT 114, and its JSON directory is mounted read-only into the downloader. The live dashboard reports connected Wi-Fi, fresh signal/link-rate samples and unchanged power saving off. No network privileges or Wi-Fi settings were changed.
+
+Authenticated live HTTP and Playwright checks verified controls, connection-script address, schedule preview, retention preview, saved-draft preservation, desktop rendering and 390-pixel layout without page errors or horizontal overflow. The mounted /Volumes/CPAP share independently shows current and dated snapshots, including current/Identification.tgt. The preview lists two older snapshots for a keep count of two; no cleanup was executed. The next scheduled run is 18 October 2026 at 10:00 Australia/Melbourne.
+
+Validation totals: 125 Python tests and 9 Node tests passed. Native Finder protocol confirmation and an actual OSCAR import remain owner acceptance checks. Changes are available in draft PR 1 of the standalone server repository.

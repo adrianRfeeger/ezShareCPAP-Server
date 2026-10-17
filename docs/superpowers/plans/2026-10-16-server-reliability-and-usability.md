@@ -12,6 +12,10 @@
 
 **Source baseline:** `1b44ee0`, repository `adrianRfeeger/ezShareCPAP-Server`, local checkout `/Users/adrianfeeger/Development/Python/ezShareCPAP-Server`. The original desktop repository is outside this work.
 
+## Implementation status, 17 October 2026
+
+All six stages are implemented in codex/server-reliability and deployed to CT 114. Validation: 125 Python tests, 9 Node tests, restricted Docker smoke checks and live desktop/mobile browser checks passed. The completed 9,473-file snapshot remains available through SMB. Automatic retention is disabled until explicitly enabled after a preview. Native Finder handoff and an actual OSCAR import remain owner acceptance checks. The checklist below records the original execution steps; see the deployment record for verified rollout evidence.
+
 ## Design brief
 
 The server should explain what it has, what it is doing and when its files are ready for OSCAR. A seeded file is available in the working archive immediately, but it becomes shareable only after a successful sync publishes a snapshot. The dashboard must make that distinction clear.
