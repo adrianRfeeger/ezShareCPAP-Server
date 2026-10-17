@@ -64,3 +64,15 @@ The image-based and source-build Compose files use the same services, folders, p
 The Container images workflow tests changes, smoke-tests the packaged app, and publishes both images for AMD64 and ARM64. Main-branch builds receive `latest` and `sha-XXXXXXX` tags. A `v1.2.3` Git tag publishes `1.2.3` and the revision tag, without replacing `latest` with a potentially older tagged release. ARM64 smoke checks run through emulation; this does not claim testing on physical ARM hardware.
 
 Keep automatic updates under your control. Pulling images does not restart running containers; `docker compose up -d` applies the selected image. Pin a revision tag or registry digest when you need a reproducible installation.
+
+
+## Verified first publication
+
+Source revision `029b884` was published on 17 October 2026. [The publishing workflow](https://github.com/adrianRfeeger/ezShareCPAP-Server/actions/runs/39000016187) passed all 125 Python tests, 9 JavaScript tests, AMD64 package smoke checks and ARM64 checks through emulation. Both image manifests were retrieved anonymously and contain Linux AMD64 and ARM64 variants.
+
+| Image | Published manifest digest |
+| --- | --- |
+| `ghcr.io/adrianrfeeger/ezsharecpap-server` | `sha256:f3f7139d32a1d54baeb96eacb184e32376d54e539242a69c82b44555df733c31` |
+| `ghcr.io/adrianrfeeger/ezsharecpap-server-samba` | `sha256:899e40ead4dd61768e110b13badc952b52e367c1368d783c18c18e690910d2e8` |
+
+The app image was also pulled without registry credentials on the Proxmox guest and passed its restricted-container smoke checks with synthetic data. The existing production services were not switched to the registry images during publication.
