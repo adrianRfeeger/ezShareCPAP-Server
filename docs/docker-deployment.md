@@ -86,7 +86,7 @@ Mount `smb://<LXC-LAN-IP>/CPAP` using username `cpap` and the SMB password. Choo
 
 The `current` link is a convenience for browsing. A dated folder keeps an import fixed while new data arrives. The share is read-only at both the Samba setting and mount layers. Snapshot files are copies rather than hard links. Failed downloads do not replace `current`.
 
-Old snapshots are retained until manually removed during a period when nobody is importing them. Monitor storage use. Do not remove the snapshot referenced by `current`. This release does not automatically delete archive files when the card deletes them. Use a separate data directory when changing cards or machines.
+Automatic retention is disabled by default. Preview cleanup in the dashboard before enabling it, then choose how many completed snapshots to retain (default two). Cleanup never deletes `current` or the working archive. Dated snapshots outside the retained set expire; avoid importing them during cleanup. When retention is disabled, snapshots remain until an explicit cleanup. Monitor storage use. This release does not automatically delete archive files when the card deletes them. Use a separate data directory when changing cards or machines.
 
 If OSCAR cannot select or read the network directory correctly, copy a completed dated snapshot to your computer and import from there. Validate one real session before relying on unattended downloads.
 
@@ -119,3 +119,54 @@ The web page's Local files section accepts a ZIP of the complete SD folder, up t
 Download latest completed SD folder creates a ZIP from the published snapshot. Extract it locally and select that folder in OSCAR. The button becomes available after the first successful sync. Upload and archive preparation are serialized, temporary files are cleaned after interruption, and normal web authentication applies to both actions. ZIP uploads use their stored wall-clock timestamps so the server can compare them with card timestamps.
 
 On a Mac, the Import into OSCAR section also provides a connection-script ZIP. Extract it and open Connect-CPAP.command to open the CPAP share in Finder. The script uses the dashboard's hostname without its web port and signs in as cpap; macOS prompts for the SMB password. It contains no credentials beyond the username. Select the current folder or a dated snapshot in OSCAR.
+
+
+## Storage, stopping and recovery
+
+The dashboard reports free space, working archive size and completed snapshot size. Category totals refresh in the background once per minute. File transfers, import extraction, snapshot publication and exports reserve disk space before writing; the default reserve is 1 GiB. Upload admission budgets the incoming request, multipart spool and saved ZIP before the body is buffered. An archive below the 4 GB upload limit can still be rejected if the disk cannot accommodate these temporary copies and its expanded contents.
+
+To enable retention, choose a count, select Preview cleanup, review the snapshot names, then enable deletion and save settings. A changed snapshot set requires a new preview. Manual cleanup also requires a preview matching the saved count. A failed download preserves the previous completed snapshot. Space checks do not delete old snapshots to force a new copy to fit.
+
+Stop after current file preserves completed files and pauses scheduled runs. Resume starts a fresh card scan and reuses complete cached files. A partial file starts again from the beginning. The server enforces a five-minute absolute file deadline from the supervising process, including a card response that trickles data too slowly for ordinary socket timeouts to help.
+
+An interrupted run resumes once when the app restarts, even when Also download when the service starts is off. An intentional user pause survives restart. A first sync with no published snapshot uses the initial-sync timeout, while later runs retain the normal timeout. A manual run or resume consumes an already-due daily slot so the scheduler does not immediately repeat it.
+
+Additional server.json settings (existing files receive these defaults):
+
+```json
+{
+  "retention_enabled": false,
+  "retention_keep": 2,
+  "storage_reserve_bytes": 1073741824,
+  "resume_interrupted": true,
+  "initial_sync_timeout": 86400,
+  "smb_host": ""
+}
+```
+
+The next run, recent history and last success use the configured timezone. The page warns after two consecutive failed scheduled runs or when a completed snapshot is more than 36 hours old. These are dashboard warnings; no messages are sent to external services.
+
+Set SMB server hostname or IP when the browser address differs from the address used for file sharing, such as behind a web proxy. Enter the hostname or IP only, without a port or URL scheme. Both Open in Finder and the connection-script ZIP use that setting. A previously downloaded script keeps its original address; download a fresh copy after changing it.
+
+## Optional Wi-Fi diagnostics
+
+The app can show guest Wi-Fi link information without controlling the interface or receiving extra Docker permissions. The collector is optional; card downloads work without it. The connection check button performs a bounded card request only while sync/import are idle, with a 30-second interval between checks.
+
+For the supplied Proxmox guest layout, install scripts/collect_wifi_status.py under /opt/ezsharecpap/scripts, create /opt/ezsharecpap/diagnostics and copy the service/timer from docker/systemd into /etc/systemd/system inside the guest. Check the interface name in the service (wlp1s0 in this setup), then enable the timer:
+
+```sh
+systemctl daemon-reload
+systemctl enable --now ezshare-wifi-status.timer
+```
+
+Use the read-only diagnostics mount when starting Compose:
+
+```sh
+docker compose -f compose.yaml -f compose.diagnostics.yaml up -d
+```
+
+The collector runs fixed read-only iw commands and writes a small JSON file every 15 seconds. It does not record SSIDs, passwords or therapy files. Samples older than 60 seconds are marked stale. Missing tools or permissions show Wi-Fi details unavailable and do not stop sync. Wireless link rates and actual SD-card throughput are labelled separately.
+
+## Upgrade and rollback
+
+Back up configuration and state, retain the previous Docker image, and deploy while the service is idle or stopped at a safe boundary. Preserve the existing data mounts and secrets. The new configuration fields are optional, and state additions remain readable by the earlier version. To roll back, restore the previous image and configuration. Snapshot deletion cannot be undone by an image rollback; enable retention only after reviewing its preview.

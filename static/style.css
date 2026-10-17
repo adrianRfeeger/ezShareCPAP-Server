@@ -4,3 +4,5 @@
 .page-header{display:flex;align-items:center;gap:28px}.page-art{width:150px;height:150px;object-fit:contain;flex:none}#download-eta{margin:9px 0 0}@media(max-width:600px){.page-header{gap:16px;align-items:flex-start}.page-art{width:78px;height:94px}.page-header h1{font-size:1.8rem}.page-header .eyebrow{font-size:.68rem}.page-header p{font-size:.87rem}}
 
 #seed-form{margin:18px 0}#seed-archive{max-width:100%}#seed-progress{margin-top:18px}#seed-action{overflow-wrap:anywhere}.secondary:disabled{opacity:.5;cursor:not-allowed}
+
+.error:empty{display:none}.actions{flex-wrap:wrap}fieldset{border:1px solid #dce5df;border-radius:10px;margin:20px 0;padding:18px}legend{padding:0 8px;font-size:.9rem}#retention-result{overflow-wrap:anywhere}#archive-counts{min-height:3em}

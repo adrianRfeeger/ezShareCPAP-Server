@@ -57,3 +57,14 @@ Wi-Fi power saving is now disabled persistently for ezshare-card at the owner's 
 One-off seed transfer completed over SSH. The source ZIP contained 8,443 eligible files and matched the server's device identification. Import added 7,605 files and retained 838 existing files. The initial sync resumed under ezshare-bootstrap-seeded.service with the new image and existing 86,400-second initial-run limit. Authenticated HTTP checks confirmed the upload/download controls, import result and advancing directory scan. Download correctly returns 404 while no completed snapshot exists. Rendered browser testing remains unavailable because the browser-control connection is unresponsive.
 
 Validation: 85 Python tests and 6 Node ETA tests passed, including ZIP corruption/path checks, cancellation, transfer serialization, cleanup and upload-body limits. Independent code review found no remaining important issue in the changes.
+
+
+## Reliability and usability implementation, 17 October 2026
+
+Implemented in the isolated codex/server-reliability branch: storage reservations and previewed retention, seeded/publication status, file-boundary stop and persistent pause, restart recovery, shared timezone scheduling, explicit SMB host/Finder access and optional guest Wi-Fi telemetry. Automatic retention remains disabled by default.
+
+Independent review identified cancelled-upload lease cleanup, stale recovery admission, an absolute file deadline and IPv6 zone validation issues. Each was reproduced and corrected with regression coverage. Additional checks cover duplicate Resume admission, consumption of an already-due schedule slot and mandatory retention preview. A real Waitress multipart upload validates the ingress reservation lifecycle. A real service process test verifies recovery, seeded-file reuse, publication and no duplicate run after the next restart.
+
+Rendered local browser checks passed at desktop and 390-pixel width with no JavaScript exceptions or horizontal overflow. Schedule preview works and polling preserves unsaved time edits. Browser plugin was unavailable; checks used the installed Playwright runtime. Finder protocol handoff and OSCAR import remain owner acceptance checks.
+
+Deployment is pending a renewed Tailscale SSH authentication check. No new image, collector or retention setting has been applied to CT 114 in this implementation run yet. The last observed production image remains the prior release; recheck live state before deployment.

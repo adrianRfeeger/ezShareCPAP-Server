@@ -9,6 +9,7 @@ import upload_server
 import hashlib
 import hmac
 import io
+import json
 import re
 import shlex
 from urllib.parse import urlsplit
@@ -54,6 +55,7 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
     transfers_lock=threading.Lock()
     app.config.update(TRANSFERS=transfers, TRANSFERS_LOCK=transfers_lock)
     root=Path(server.load_config(config_path)['root'])
+    storage.configure(root,server.load_config(config_path)['storage_reserve_bytes'])
     try:
         with archive_io.transfer_lock(root): pass
     except BlockingIOError: pass
@@ -66,7 +68,7 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
     def live_state():
         cfg=config();state=server.read_live_state(root)
         state['diagnostics']={'wifi':diagnostics.read_wifi_status('/diagnostics/wifi.json',datetime.now(timezone.utc))}
-        try:state['diagnostics']['card']=__import__('json').loads((root/'state/card-check.json').read_text())
+        try:state['diagnostics']['card']=json.loads((root/'state/card-check.json').read_text())
         except (OSError,ValueError):state['diagnostics']['card']={}
         state['schedule']=scheduling.schedule_status(datetime.now(timezone.utc),cfg,state)
         return state
@@ -219,14 +221,20 @@ exit "$result"
     def storage_preview():
         try:
             with storage.snapshot_access(root,False):
-                return jsonify(storage.retention_preview(root,int(request.args.get('keep','2'))))
+                preview=storage.retention_preview(root,int(request.args.get('keep','2')))
+                session['retention_preview']={'keep':int(request.args.get('keep','2')),'delete':preview['delete'],'retain':preview['retain']}
+                return jsonify(preview)
         except (ValueError,OSError) as exc: return jsonify(error=str(exc)),400
 
     @app.post('/storage/prune')
     def storage_prune():
         try:
             with server.run_lock(root/'state'):
-                storage.prune_snapshots(root,config()['retention_keep'])
+                saved_keep=config()['retention_keep']
+                preview=storage.retention_preview(root,saved_keep)
+                if session.get('retention_preview')!={'keep':saved_keep,'delete':preview['delete'],'retain':preview['retain']}:
+                    return 'Preview cleanup using the saved retention count before deleting snapshots.',400
+                storage.prune_snapshots(root,saved_keep)
             return redirect('/?notice=Snapshot+cleanup+finished',303)
         except BlockingIOError: return 'A sync or import is running.',409
         except (ValueError,OSError) as exc: return str(exc),400
@@ -244,7 +252,11 @@ exit "$result"
             candidate['retention_enabled']=request.form.get('retention_enabled')=='on'
             if candidate['retention_enabled']:
                 try:
-                    with storage.snapshot_access(root,False):storage.retention_preview(root,candidate['retention_keep'])
+                    with storage.snapshot_access(root,False):
+                        preview=storage.retention_preview(root,candidate['retention_keep'])
+                    changed=not config()['retention_enabled'] or config()['retention_keep']!=candidate['retention_keep']
+                    if changed and session.get('retention_preview')!={'keep':candidate['retention_keep'],'delete':preview['delete'],'retain':preview['retain']}:
+                        return 'Preview cleanup before enabling retention or changing its count.',400
                 except (ValueError,OSError) as exc:return str(exc),400
         # Validate before replacing the actual settings; preserve card URL and paths.
         temporary = config_path.with_name('.validate-' + secrets.token_hex(8) + '.json')
@@ -252,6 +264,7 @@ exit "$result"
             server.atomic_json(temporary, candidate)
             server.load_config(temporary)
             server.atomic_json(config_path, candidate)
+            storage.configure(root,candidate['storage_reserve_bytes'])
         except ValueError as exc:
             return str(exc), 400
         finally:

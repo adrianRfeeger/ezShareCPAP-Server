@@ -26,11 +26,13 @@ log = logging.getLogger(__name__)
 STOP = threading.Event()
 CHILD = None
 ACTIVE_APP = None
+FILE_TIMEOUT = 300
 
 
 def validate_smb_host(host):
     if not isinstance(host,str):raise ValueError('SMB host must be text')
     if not host:return host
+    if '%' in host:raise ValueError('Use an IPv6 address without a zone identifier')
     try:return str(ipaddress.ip_address(host))
     except ValueError:pass
     labels=host.rstrip('.').split('.')
@@ -217,7 +219,23 @@ def download_archive(work, cfg):
                              start_new_session=True,
                              env=dict(os.environ, EZSHARE_RUN_ID=cfg['_run_id']))
     try:
-        return CHILD.wait(timeout=cfg['timeout']) == 0 and not STOP.is_set()
+        deadline=time.monotonic()+cfg['timeout']
+        file_id=None;file_started=None;stop_started=None
+        while CHILD.poll() is None:
+            now=time.monotonic()
+            if STOP.is_set() or now>=deadline:return False
+            try:progress=json.loads((Path(cfg['root'])/'state/progress.json').read_text())
+            except (OSError,ValueError):progress={}
+            current=progress.get('file_attempt_id') if progress.get('run_id')==cfg['_run_id'] and progress.get('current_file') else None
+            if current!=file_id:file_id=current;file_started=now if current else None
+            if file_started is not None and now-file_started>=FILE_TIMEOUT:
+                log.error('File exceeded absolute transfer deadline');return False
+            if run_control.stop_requested(Path(cfg['root']),cfg['_run_id']) and not current:
+                if stop_started is None:stop_started=now
+                if now-stop_started>=5:return False
+            try:CHILD.wait(timeout=.1)
+            except subprocess.TimeoutExpired:pass
+        return CHILD.returncode==0 and not STOP.is_set()
     except subprocess.TimeoutExpired:
         log.error('Download exceeded total run timeout')
         return False
@@ -239,6 +257,7 @@ def download_child(cfg):
     ACTIVE_APP = app
     app.activity_callback = ProgressWriter(Path(cfg['root']), os.environ.get('EZSHARE_RUN_ID', ''))
     app.network_mode = 'existing'
+    app.download_guard=lambda size:storage.reserve_space(Path(cfg['root']),'card download',size or 1024*1024)
     app.should_stop=lambda:run_control.stop_requested(Path(cfg['root']),os.environ.get('EZSHARE_RUN_ID',''))
     app.set_params(str(Path(cfg['root']) / 'work/archive'), cfg['url'], None,
                    False, True, False, False, None, None, [], 3, 5, False)
@@ -278,15 +297,23 @@ def _copy_archive(source,destination,deadline,lease):
 
 def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, resume=False):
     root = Path(cfg['root'])
+    effective_trigger=trigger or ('scheduled' if schedule_date else 'manual')
     try:
         with run_lock(root / 'state'):
+            storage.configure(root,cfg.get('storage_reserve_bytes',storage.RESERVE_BYTES))
             status = read_state(root)
+            if trigger=='recovery' and run_control.recovery_decision(root,status,cfg)!='resume':return 0
             if schedule_date and status.get('last_scheduled_date', '') >= schedule_date:
                 return 0
             started = time.monotonic()
             with run_control.control_lock(root):
                 if run_control.read_control(root).get('paused') and not resume:return 75
-                if resume:run_control.clear_pause(root)
+                if resume:
+                    eligible=run_control.read_control(root).get('paused') or status.get('run_state') in ('interrupted','paused','failed') or status.get('running') or status.get('error')
+                    if not eligible:return 75
+                    run_control.clear_pause(root)
+                if schedule_date is None and effective_trigger=='manual':
+                    schedule_date=scheduled_date(datetime.now(timezone.utc),cfg,status.get('last_scheduled_date'))
                 status.update(last_attempt=datetime.now(timezone.utc).isoformat(), running=True,error=None,run_state='running')
                 atomic_json(root / 'state/status.json', status)
             if schedule_date:
@@ -343,7 +370,8 @@ def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, r
                 if STOP.is_set():
                     raise RuntimeError('Stopped before publication')
                 snapshot = published / name
-                with storage.snapshot_access(root,True):
+                with storage.snapshot_access(root,True),run_control.control_lock(root):
+                    if run_control.stop_requested(root,status['last_attempt']):raise InterruptedError('Stopped before publication')
                     staging.rename(snapshot)
                     staging = None
                     pointer = published / ('.current-' + name)
@@ -357,7 +385,8 @@ def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, r
                 if cfg.get('retention_enabled'):
                     try: storage.prune_snapshots(root,cfg.get('retention_keep',2))
                     except (OSError,ValueError) as exc: status['storage_warning']=str(exc)
-                storage.refresh_inventory(root)
+                try:storage.refresh_inventory(root)
+                except OSError as exc:status['storage_warning']='Could not refresh storage totals: '+str(exc)
             except Exception as exc:
                 paused=run_control.stop_requested(root,status['last_attempt'])
                 interrupted=STOP.is_set()
@@ -373,7 +402,7 @@ def run_once(cfg, download=download_archive, schedule_date=None, trigger=None, r
                 status['history'] = (status.get('history', []) + [{
                     'finished': datetime.now(timezone.utc).isoformat(),
                     'result': 'Stopped' if status.get('run_state')=='paused' else 'Interrupted' if status.get('run_state')=='interrupted' else 'Success' if return_code==0 else 'Failed',
-                    'trigger':trigger or ('scheduled' if schedule_date else 'manual'),'schedule_date':schedule_date,
+                    'trigger':effective_trigger,'schedule_date':schedule_date,
                     'duration_seconds': status['duration_seconds'], 'error':status.get('error')}])[-20:]
                 atomic_json(root / 'state/status.json', status)
             return return_code

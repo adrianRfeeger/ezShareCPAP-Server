@@ -2,7 +2,7 @@
 
 A Docker-hosted ez Share SD-card downloader for CPAP data, with a password-protected web interface and scheduled sync. It runs on a Linux server, including a Proxmox guest with access to the card's Wi-Fi network.
 
-The web interface shows sync progress, the current action, recent results and an estimated download time. You can start a sync, change its schedule, upload an existing SD-folder ZIP to seed the archive, or download the latest completed snapshot. A read-only Samba share makes completed snapshots available for local OSCAR imports.
+The web interface shows sync progress, the current action, recent results and an estimated download time. You can start, stop and resume a sync, change its schedule, upload an existing SD-folder ZIP to seed the archive, or download the latest completed snapshot. The dashboard also shows storage use, optional snapshot retention, the next scheduled run and connection diagnostics. Interrupted runs can recover after an app restart. A read-only Samba share makes completed snapshots available for local OSCAR imports.
 
 ## Setup
 

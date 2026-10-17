@@ -1,3 +1,5 @@
+from contextlib import ExitStack
+import uuid
 # file_ops.py
 import datetime
 import re
@@ -216,14 +218,20 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
     while retries > 0:
         if getattr(ezshare_instance,'should_stop',lambda:False)():return False
         tmp_file_path = None
+        resources=ExitStack()
+        response=None
         cancelled = False
         try:
+            if hasattr(ezshare_instance,'activity'):
+                ezshare_instance.activity('downloading',f'Downloading {file_path.name}',current_file=file_path.name,file_attempt_id=uuid.uuid4().hex,file_bytes=0)
             response = ezshare_instance.session.get(url, stream=True, timeout=5)
             response.raise_for_status()
 
             length = response.headers.get('content-length')
             total_size = int(length) if length is not None else None
             received = 0
+            pending_bytes=0
+            lease=resources.enter_context(ezshare_instance.download_guard(total_size)) if hasattr(ezshare_instance,'download_guard') else None
             with NamedTemporaryFile(delete=False, dir=file_path.parent, prefix='.ezshare-part-') as tmp_file:
                 tmp_file_path = pathlib.Path(tmp_file.name)
                 for data in response.iter_content(1024):
@@ -232,13 +240,18 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
                         logger.info('Cancelling download of %s', str(file_path))
                         cancelled = True
                         break
+                    if lease:lease.ensure(pending_bytes+len(data))
                     tmp_file.write(data)
+                    pending_bytes+=len(data)
+                    if lease and pending_bytes>=1024*1024:
+                        tmp_file.flush();lease.consume(pending_bytes);pending_bytes=0
                     received += len(data)
                     if hasattr(ezshare_instance, 'activity'):
                         ezshare_instance.activity('downloading', f'Downloading {file_path.name}',
                                                   current_file=file_path.name, file_bytes=received,
                                                   file_size=total_size)
                 tmp_file.flush()
+                if lease and pending_bytes:lease.consume(pending_bytes)
                 os.fsync(tmp_file.fileno())
 
             if cancelled:
@@ -262,6 +275,9 @@ def download_file(ezshare_instance, url, file_path, file_ts=None):
                 return False  # Return False after all retries have been exhausted
             else:
                 time.sleep(ezshare_instance.connection_delay)  # Wait before retrying
+        finally:
+            resources.close()
+            if response is not None and hasattr(response,'close'):response.close()
 def check_dirs(ezshare_instance, dirs, url, dir_path, total_files, processed_files, is_running):
     """
     Recursively process each directory in the list.
