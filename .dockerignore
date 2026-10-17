@@ -10,3 +10,8 @@ secrets
 data
 config
 *.log
+
+diagnostics
+release
+docs
+.github

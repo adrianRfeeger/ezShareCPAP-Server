@@ -1,0 +1,45 @@
+services:
+  downloader:
+    image: ghcr.io/adrianrfeeger/ezsharecpap-server:${EZSHARE_VERSION:-latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - ./config:/config
+      - ./data:/data
+    ports:
+      - "${LAN_IP:?Set LAN_IP to the LXC LAN address}:8080:8080"
+    secrets: [web_password]
+    stop_grace_period: 20s
+    healthcheck:
+      test: [CMD, python, server.py, --config, /config/server.json, health]
+      interval: 60s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  samba:
+    image: ghcr.io/adrianrfeeger/ezsharecpap-server-samba:${EZSHARE_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      SHARE_UID: "${PUID:-1000}"
+      SHARE_GID: "${PGID:-1000}"
+    ports:
+      - "${LAN_IP:?Set LAN_IP to the LXC LAN address}:445:445"
+    volumes:
+      - ./data/published:/share:ro
+    secrets: [smb_password]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+secrets:
+  smb_password:
+    file: ./secrets/smb_password
+  web_password:
+    file: ./secrets/web_password

@@ -1,0 +1,147 @@
+name: Container images
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - '*.py'
+      - 'Dockerfile'
+      - 'requirements-server.txt'
+      - 'requirements-test.txt'
+      - 'static/**'
+      - 'templates/**'
+      - 'docker/samba/**'
+      - 'compose.release.yaml'
+      - 'scripts/smoke_container.py'
+      - '.github/workflows/container-images.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: container-images-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y tk
+      - run: python -m pip install -r requirements-test.txt
+      - run: python -c "import tkinter, pygubu"
+      - run: python -m pytest -q
+      - run: node --test tests/*.mjs
+  publish:
+    needs: tests
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: server
+            context: .
+            dockerfile: Dockerfile
+            suffix: ''
+          - service: samba
+            context: docker/samba
+            dockerfile: docker/samba/Dockerfile
+            suffix: '-samba'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image names and tags
+        id: names
+        env:
+          OWNER: ${{ github.repository_owner }}
+          SUFFIX: ${{ matrix.suffix }}
+        shell: bash
+        run: |
+          image="ghcr.io/${OWNER,,}/ezsharecpap-server${SUFFIX}"
+          {
+            echo "image=$image"
+            echo 'tags<<TAGS'
+            echo "$image:sha-${GITHUB_SHA::7}"
+            if [[ "$GITHUB_REF" == 'refs/heads/main' ]]; then
+              echo "$image:latest"
+            elif [[ "$GITHUB_REF" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "$image:${BASH_REMATCH[1]}"
+            fi
+            echo TAGS
+          } >> "$GITHUB_OUTPUT"
+      - name: Build test image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          tags: ezshare-smoke:${{ matrix.service }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: Smoke test application
+        if: matrix.service == 'server'
+        run: docker run --rm -i --user 1000:1000 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /data:uid=1000,gid=1000 --tmpfs /tmp ezshare-smoke:server python - < scripts/smoke_container.py
+      - name: Validate Samba
+        if: matrix.service == 'samba'
+        run: docker run --rm --entrypoint testparm ezshare-smoke:samba -s
+      - name: Build Intel/AMD and ARM64 candidate
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.names.outputs.image }}:build-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.title=ezShareCPAP ${{ matrix.service }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          provenance: mode=min
+      - name: Smoke test ARM64 application
+        if: matrix.service == 'server'
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: docker run --rm --platform linux/arm64 -i --user 1000:1000 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /data:uid=1000,gid=1000 --tmpfs /tmp "$IMAGE@$DIGEST" python - < scripts/smoke_container.py
+      - name: Validate ARM64 Samba
+        if: matrix.service == 'samba'
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: docker run --rm --platform linux/arm64 --entrypoint testparm "$IMAGE@$DIGEST" -s
+      - name: Promote verified image tags
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          FINAL_TAGS: ${{ steps.names.outputs.tags }}
+        shell: bash
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] || args+=(--tag "$tag")
+          done <<< "$FINAL_TAGS"
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+      - name: Record digest
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "Published $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"

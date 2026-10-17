@@ -1,4 +1,5 @@
 FROM python:3.13-slim-bookworm
+LABEL org.opencontainers.image.source="https://github.com/adrianRfeeger/ezShareCPAP-Server"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements-server.txt .

@@ -57,6 +57,10 @@ Use the chosen PUID/PGID instead of 1000:1000 above if you changed them. Compose
 
 Edit `config/server.json` before first launch. The default schedule is 10:00 in Australia/Melbourne, with a run on startup. Set `run_on_startup` to false if you want to verify connectivity before downloading. `timeout` bounds the download, retry and snapshot-building window in seconds. Copies check the deadline between chunks; a blocked filesystem call may still need container termination. Snapshot copying also requires sufficient disk space. `attempts` and `retry_delay` control bounded retries within it.
 
+## Use published images
+
+Use [the public-image installation guide](container-images.md) to install without a source build. In an existing checkout, `docker compose -f compose.release.yaml pull` and `docker compose -f compose.release.yaml up -d` use the same configuration, data and secret mounts.
+
 ## Build and start
 
 ```sh

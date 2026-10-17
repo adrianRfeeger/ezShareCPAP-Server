@@ -6,6 +6,8 @@ The web interface shows sync progress, the current action, recent results and an
 
 ## Setup
 
+For installation without a local build, use the [public Docker images](docs/container-images.md) and `compose.release.yaml`.
+
 Follow the [Docker deployment guide](docs/docker-deployment.md) for configuration, passwords, networking and startup. The [Proxmox plan](docs/docker-proxmox-plan.md) describes the guest and Wi-Fi setup.
 
 Docker runs inside the Linux guest. The guest needs access to both your home network and the ez Share card. Keep the web interface and file share on your trusted network.
