@@ -76,3 +76,9 @@ The optional Wi-Fi collector timer is active inside CT 114, and its JSON directo
 Authenticated live HTTP and Playwright checks verified controls, connection-script address, schedule preview, retention preview, saved-draft preservation, desktop rendering and 390-pixel layout without page errors or horizontal overflow. The mounted /Volumes/CPAP share independently shows current and dated snapshots, including current/Identification.tgt. The preview lists two older snapshots for a keep count of two; no cleanup was executed. The next scheduled run is 18 October 2026 at 10:00 Australia/Melbourne.
 
 Validation totals: 125 Python tests and 9 Node tests passed. Native Finder protocol confirmation and an actual OSCAR import remain owner acceptance checks. Changes are available in draft PR 1 of the standalone server repository.
+
+## Favicon and readable durations, 18 October 2026
+
+Revision 6d07a67 adds a page favicon using the existing CPAP artwork and readable elapsed/update ages. Run-history durations and Wi-Fi sample ages use the same formatter. Values show up to two adjacent units, such as 2 hours 15 minutes or 1 day 3 hours; missing and future timestamps do not produce invalid labels.
+
+Deployed local image sha256:498aca25e05b39a78b4339a5fe558ff7dffba871439cce9e06e7e144f3e298e5 preserves the diagnostics mount and existing startup-sync setting. Live browser checks verified the PNG favicon, elapsed/update labels, readable run history and Wi-Fi age with no page errors. Synthetic browser checks covered multi-day values and a 390-pixel viewport. All 11 JavaScript tests and 25 focused web tests passed locally; the full GitHub test job also passed. The public image workflow republishes the same update for AMD64 and ARM64.
