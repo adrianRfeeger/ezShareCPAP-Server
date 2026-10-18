@@ -1,9 +1,11 @@
-import {formatTimestamp} from './status-view.mjs';
+import {formatTimestamp, formatElapsed, formatUpdated} from './status-view.mjs';
 import { DownloadETA, formatDuration } from './eta.mjs';
 (() => {
   const el = id => document.getElementById(id);
   const text = (id, value) => { el(id).textContent = value; };
-  const seconds = value => Math.max(0, Math.floor(value));
+  document.querySelectorAll('[data-duration]').forEach(cell => {
+    cell.textContent = formatElapsed(Number(cell.dataset.duration));
+  });
   const bytes = value => value >= 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${Math.round(value / 1024)} KB`;
   const estimate = new DownloadETA();
   let fetching = false;
@@ -53,8 +55,8 @@ import { DownloadETA, formatDuration } from './eta.mjs';
       if (eta != null && !stale && estimate.filesPerMinute != null) {
         text('progress-detail', `${detail} · Recent pace: about ${estimate.filesPerMinute.toFixed(1)} files/min`);
       }
-      const elapsed = state.running && state.last_attempt ? `Elapsed ${seconds((Date.now() - Date.parse(state.last_attempt))/1000)} s` : '';
-      const age = progress.updated_at ? `Updated ${seconds((Date.now() - Date.parse(progress.updated_at))/1000)} s ago` : '';
+      const elapsed = state.running && state.last_attempt ? `Elapsed ${formatElapsed((Date.now() - Date.parse(state.last_attempt))/1000)}` : '';
+      const age = formatUpdated(progress.updated_at);
       text('progress-freshness', [elapsed, age].filter(Boolean).join(' · '));
       text('live-connection', '');
       text('last-success', state.last_success ? formatTimestamp(state.last_success,state.schedule?.timezone) : 'No completed downloads yet');
@@ -71,7 +73,7 @@ import { DownloadETA, formatDuration } from './eta.mjs';
         historyKey = key;
         el('history-body').replaceChildren(...[...history].reverse().map(run => {
           const row = document.createElement('tr');
-          for (const value of [formatTimestamp(run.finished,state.schedule?.timezone), run.result, `${run.duration_seconds} s`]) {
+          for (const value of [formatTimestamp(run.finished,state.schedule?.timezone), run.result, formatElapsed(run.duration_seconds)]) {
             const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
           }
           return row;

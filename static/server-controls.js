@@ -1,4 +1,4 @@
-import {availabilityMessage,formatTimestamp} from './status-view.mjs';
+import {availabilityMessage,formatTimestamp,formatElapsed} from './status-view.mjs';
 const el = id => document.getElementById(id);
 const size = value => value == null ? 'calculating' : `${(value / 1024 ** 3).toFixed(2)} GiB`;
 window.addEventListener('sync-state', ({detail: state}) => {
@@ -8,7 +8,7 @@ window.addEventListener('sync-state', ({detail: state}) => {
   const transfer = state.progress?.transfer || {};
   const inactive = !transfer.last_activity_at || Date.now() - Date.parse(transfer.last_activity_at) > 60000;
   el('card-status').textContent = card.checked_at ? `Last card check: ${card.reachable ? 'reachable' : (card.error || 'unreachable')} at ${formatTimestamp(card.checked_at,state.schedule?.timezone)}` : 'Card status: no manual check yet';
-  el('wifi-status').textContent = !wifi.available ? 'Wi-Fi details unavailable' : wifi.error || (wifi.stale ? `Wi-Fi sample is stale (${wifi.age_seconds}s old).` : `Wi-Fi: ${wifi.connected ? 'connected' : 'disconnected'}, signal ${wifi.signal_dbm ?? 'unknown'} dBm. Link rates: receive ${wifi.rx_mbps ?? 'unknown'}, transmit ${wifi.tx_mbps ?? 'unknown'} Mbit/s. Updated ${wifi.age_seconds}s ago.`);
+  el('wifi-status').textContent = !wifi.available ? 'Wi-Fi details unavailable' : wifi.error || (wifi.stale ? `Wi-Fi sample is stale (${formatElapsed(wifi.age_seconds)} old).` : `Wi-Fi: ${wifi.connected ? 'connected' : 'disconnected'}, signal ${wifi.signal_dbm ?? 'unknown'} dBm. Link rates: receive ${wifi.rx_mbps ?? 'unknown'}, transmit ${wifi.tx_mbps ?? 'unknown'} Mbit/s. Updated ${formatElapsed(wifi.age_seconds)} ago.`);
   el('transfer-status').textContent = state.running && state.progress?.phase === 'downloading' ? (inactive ? 'No recent transfer activity.' : transfer.bytes_per_second == null ? 'Calculating recent transfer speed…' : `Recent SD-card transfer: ${(transfer.bytes_per_second / 1024).toFixed(1)} KiB/s.`) : '';
   el('card-check').disabled = !!state.busy;
   const schedule = state.schedule || {};
