@@ -1,4 +1,2 @@
 -r requirements-server.txt
 pytest==9.1.1
-# Inherited CLI tests import the desktop entry point; keep GUI helpers out of server images.
-pygubu==0.42.1

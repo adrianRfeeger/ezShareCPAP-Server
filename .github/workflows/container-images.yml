@@ -32,9 +32,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-      - run: sudo apt-get update && sudo apt-get install -y tk
       - run: python -m pip install -r requirements-test.txt
-      - run: python -c "import tkinter, pygubu"
       - run: python -m pytest -q
       - run: node --test tests/*.mjs
   publish:

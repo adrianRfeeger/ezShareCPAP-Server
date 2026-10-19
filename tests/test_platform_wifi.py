@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ez_share_config import EzShareConfig
 from wifi_utils import ConnectionManager
 
 
@@ -403,20 +402,6 @@ Interface name: Wi-Fi
                 ["nmcli", "con", "delete", "id", "ezShareCPAP-ez Share"],
                 ["nmcli", "dev", "disconnect", "wlan0"],
             ],
-        )
-
-
-class EzShareConfigTests(unittest.TestCase):
-    def test_config_page_uses_cross_platform_browser_open(self):
-        config = EzShareConfig(SimpleNamespace())
-
-        with patch("ez_share_config.requests.get", return_value=SimpleNamespace(status_code=200)), \
-                patch("ez_share_config.update_status"), \
-                patch("ez_share_config.webbrowser.open") as browser_open:
-            config._open_configuration_page()
-
-        browser_open.assert_called_once_with(
-            "http://192.168.4.1/publicdir/index.htm?vtype=0&fdir=&ftype=1&devw=320&devh=356"
         )
 
 

@@ -45,7 +45,9 @@ A resource/device mapping is not proof of working Wi-Fi. The first deployment ch
 
 No Proxmox configuration was changed during planning or inspection.
 
-## What the repository already provides
+## Original desktop starting point
+
+This planning record describes the original desktop code before the server repository was separated. The desktop-only files listed here have since been removed from this repository.
 
 - `main.py` dispatches CLI sync before importing the desktop GUI.
 - `cli.py` accepts paths, URLs, retries, and configuration files, and reports process exit status.

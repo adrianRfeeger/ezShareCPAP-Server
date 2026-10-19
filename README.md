@@ -24,4 +24,8 @@ To seed the working archive, upload a ZIP of the full SD folder, including Ident
 
 ## Project history
 
-This is a separate repository for the server version, based on [ezShareCPAP](https://github.com/adrianRfeeger/ezShareCPAP). It preserves the source history and existing licence. The inherited desktop application documentation is in [README-desktop.md](README-desktop.md).
+This is a separate repository for the server version, based on [ezShareCPAP](https://github.com/adrianRfeeger/ezShareCPAP). It preserves the source history and existing licence. Desktop downloads and documentation are maintained in the [desktop repository](https://github.com/adrianRfeeger/ezShareCPAP).
+
+## Development checks
+
+Install `requirements-test.txt`, then run `python -m pytest -q` and `node --test tests/*.mjs`. The server and its tests do not require Tkinter or pygubu.
