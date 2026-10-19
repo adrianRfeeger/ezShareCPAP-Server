@@ -13,6 +13,8 @@ services:
       - ./data:/data
     ports:
       - "${LAN_IP:?Set LAN_IP to the LXC LAN address}:8080:8080"
+    environment:
+      WEB_AUTH_MODE: "${WEB_AUTH_MODE:-password}"
     secrets: [web_password]
     stop_grace_period: 20s
     healthcheck:

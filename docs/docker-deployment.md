@@ -174,3 +174,26 @@ The collector runs fixed read-only iw commands and writes a small JSON file ever
 ## Upgrade and rollback
 
 Back up configuration and state, retain the previous Docker image, and deploy while the service is idle or stopped at a safe boundary. Preserve the existing data mounts and secrets. The new configuration fields are optional, and state additions remain readable by the earlier version. To roll back, restore the previous image and configuration. Snapshot deletion cannot be undone by an image rollback; enable retention only after reviewing its preview.
+
+## Password-free dashboard
+
+To open the dashboard without signing in, set `WEB_AUTH_MODE=none` in `.env` and recreate the downloader. This gives anyone who can reach the dashboard access to CPAP downloads, uploads, sync controls and settings. Use it only on a trusted LAN.
+
+With a source build, run:
+
+```sh
+docker compose up -d --build downloader
+```
+
+With a published image that includes this option, run:
+
+```sh
+docker compose -f compose.release.yaml pull downloader
+docker compose -f compose.release.yaml up -d downloader
+```
+
+The supplied Compose files still mount `secrets/web_password`. For a new password-free installation, create an empty file there instead of choosing a web password. Keep an existing password file if you may switch back. The application does not read it in password-free mode. SMB still requires its separate password.
+
+The server saves a random session secret in `config/.web-session-secret`, with owner-only permissions. Keep the config directory writable by the downloader account. Browser-request protections and upload storage limits remain active.
+
+To restore login protection, set `WEB_AUTH_MODE=password`, ensure `secrets/web_password` contains at least 16 characters and is readable by the downloader, then recreate the downloader. Password protection is the default when the setting is absent. Changing modes invalidates existing browser sessions; reload the dashboard before submitting a form.

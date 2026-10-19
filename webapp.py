@@ -1,4 +1,4 @@
-"""Password-protected LAN controls for the downloader."""
+"""LAN controls for the downloader, with optional password authentication."""
 import base64
 import storage
 import run_control
@@ -38,14 +38,36 @@ def smb_url(configured_host,request_host):
 def create_app(config_path='/config/server.json', password=None, start_scheduler=True):
     config_path = Path(config_path)
     server.load_config(config_path)
-    if password is None:
-        password = Path(os.environ.get('WEB_PASSWORD_FILE', '/run/secrets/web_password')).read_text().strip()
-    if len(password) < 16:
-        raise ValueError('Web password must contain at least 16 characters')
+    auth_mode = os.environ.get('WEB_AUTH_MODE', 'password')
+    if auth_mode not in ('password', 'none'):
+        raise ValueError('WEB_AUTH_MODE must be password or none')
+    if auth_mode == 'password':
+        if password is None:
+            password = Path(os.environ.get('WEB_PASSWORD_FILE', '/run/secrets/web_password')).read_text().strip()
+        if len(password) < 16:
+            raise ValueError('Web password must contain at least 16 characters')
+        session_secret = hashlib.sha256(('ezshare-session:' + password).encode()).digest()
+        upload_auth = 'Basic '+base64.b64encode(('admin:'+password).encode()).decode()
+    else:
+        # Keep browser sessions valid across restarts without requiring a password.
+        import fcntl
+        secret_path = config_path.parent / '.web-session-secret'
+        fd = os.open(secret_path, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, 'r+b') as secret_file:
+            fcntl.flock(secret_file, fcntl.LOCK_EX)
+            session_secret = secret_file.read()
+            if not session_secret:
+                session_secret = secrets.token_bytes(32)
+                secret_file.write(session_secret)
+                secret_file.flush()
+                os.fsync(secret_file.fileno())
+            if len(session_secret) != 32:
+                raise ValueError('Invalid persistent web session secret')
+        upload_auth = None
     app = Flask(__name__)
     app.request_class=upload_server.UploadRequest
-    app.config['UPLOAD_AUTH']='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
-    app.secret_key = hashlib.sha256(('ezshare-session:' + password).encode()).digest()
+    app.config['UPLOAD_AUTH'] = upload_auth
+    app.secret_key = session_secret
     app.config.update(CONFIG_PATH=config_path, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE='Strict', MAX_CONTENT_LENGTH=4096)
     action_lock = threading.Lock()
@@ -78,7 +100,7 @@ def create_app(config_path='/config/server.json', password=None, start_scheduler
         if request.endpoint == 'import_zip':
             request.max_content_length = archive_io.MAX_ZIP_BYTES + 1024 * 1024
         credentials = request.authorization
-        if not credentials or not hmac.compare_digest(credentials.username or '', 'admin') or not hmac.compare_digest(credentials.password or '', password):
+        if auth_mode == 'password' and (not credentials or not hmac.compare_digest(credentials.username or '', 'admin') or not hmac.compare_digest(credentials.password or '', password)):
             return 'Sign in as admin.', 401, {'WWW-Authenticate': 'Basic realm="ezShareCPAP"'}
         if request.endpoint in ('import_zip','download_zip'):
             g.transfer_done=threading.Event()

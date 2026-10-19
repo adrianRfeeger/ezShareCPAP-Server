@@ -55,7 +55,7 @@ def upload_channel(root, auth_header, max_upload, reserve):
                     "A supported Content-Length is required; request exceeds the limit"
                 )
             elif is_upload:
-                if not hmac.compare_digest(
+                if auth_header is not None and not hmac.compare_digest(
                     self.headers.get("AUTHORIZATION", ""), auth_header
                 ):
                     self.error = BadRequest("Sign in before uploading")

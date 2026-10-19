@@ -1,12 +1,14 @@
 # ezShareCPAP Server
 
-A Docker-hosted ez Share SD-card downloader for CPAP data, with a password-protected web interface and scheduled sync. It runs on a Linux server, including a Proxmox guest with access to the card's Wi-Fi network.
+A Docker-hosted ez Share SD-card downloader for CPAP data, with a web interface and scheduled sync. It runs on a Linux server, including a Proxmox guest with access to the card's Wi-Fi network.
 
 The web interface shows sync progress, the current action, recent results and an estimated download time. You can start, stop and resume a sync, change its schedule, upload an existing SD-folder ZIP to seed the archive, or download the latest completed snapshot. The dashboard also shows storage use, optional snapshot retention, the next scheduled run and connection diagnostics. Interrupted runs can recover after an app restart. A read-only Samba share makes completed snapshots available for local OSCAR imports.
 
 ## Dashboard
 
 <a href="docs/images/ezsharecpap-dashboard.png"><img src="docs/images/ezsharecpap-dashboard-preview.png" alt="ezShareCPAP Server dashboard showing download status, schedule and storage settings, OSCAR import instructions, connection details, and recent runs" width="720"></a>
+
+Password protection is enabled by default. A [password-free dashboard](docs/docker-deployment.md#password-free-dashboard) is available for trusted LANs.
 
 ## Setup
 

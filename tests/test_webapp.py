@@ -310,7 +310,12 @@ def test_check_connection_is_idle_only_and_rate_limited(app, monkeypatch):
     )
 
 
-def test_real_waitress_upload_releases_all_reservations(app):
+@pytest.mark.parametrize('password_free', [False, True])
+def test_real_waitress_upload_releases_all_reservations(app, monkeypatch, password_free):
+    if password_free:
+        monkeypatch.setenv('WEB_AUTH_MODE', 'none')
+        app = webapp.create_app(app.config['CONFIG_PATH'], start_scheduler=False)
+    headers = {} if password_free else auth()
     import io, zipfile, threading, urllib.request, http.cookiejar, time, storage
     from waitress import create_server
     from upload_server import upload_channel
@@ -320,7 +325,7 @@ def test_real_waitress_upload_releases_all_reservations(app):
         app, host="127.0.0.1", port=0, max_request_body_size=1000000
     )
     listener.channel_class = upload_channel(
-        root, auth()["Authorization"], 1000000, 1024**3
+        root, app.config['UPLOAD_AUTH'], 1000000, 1024**3
     )
 
     def run():
@@ -335,9 +340,9 @@ def test_real_waitress_upload_releases_all_reservations(app):
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
     )
     try:
-        with opener.open(urllib.request.Request(base, headers=auth())) as response:
+        with opener.open(urllib.request.Request(base, headers=headers)) as response:
             response.read()
-        page = opener.open(urllib.request.Request(base, headers=auth())).read().decode()
+        page = opener.open(urllib.request.Request(base, headers=headers)).read().decode()
         import re
 
         token = re.search('name="csrf" value="([^"]+)"', page).group(1)
@@ -369,3 +374,30 @@ def test_real_waitress_upload_releases_all_reservations(app):
         assert (root / "work/archive/DATALOG/night.edf").stat().st_size == 32768
     finally:
         listener.close()
+
+
+def test_password_free_dashboard_keeps_csrf_and_persistent_session(tmp_path, monkeypatch):
+    path = tmp_path / 'server.json'
+    path.write_text(json.dumps({'root': str(tmp_path / 'data'), 'url': 'http://card/dir?dir=A:'}))
+    monkeypatch.setenv('WEB_AUTH_MODE', 'none')
+    monkeypatch.setenv('WEB_PASSWORD_FILE', str(tmp_path / 'missing-password'))
+    app = webapp.create_app(path, start_scheduler=False)
+    client = app.test_client()
+    assert client.get('/').status_code == 200
+    assert app.config['UPLOAD_AUTH'] is None
+    with client.session_transaction() as session:
+        token = session['csrf']
+    assert client.post('/settings', data={'time': '11:00'}).status_code == 403
+    data = {'csrf': token, 'time': '11:00', 'timezone': 'Australia/Melbourne'}
+    assert client.post('/settings', data=data, headers={'Origin': 'https://other.test'}).status_code == 403
+    assert client.post('/settings', data=data).status_code == 303
+    restarted = webapp.create_app(path, start_scheduler=False)
+    assert restarted.secret_key == app.secret_key
+    secret = path.parent / '.web-session-secret'
+    assert secret.stat().st_mode & 0o777 == 0o600
+
+
+def test_invalid_auth_mode_fails_closed(app, monkeypatch):
+    monkeypatch.setenv('WEB_AUTH_MODE', 'offf')
+    with pytest.raises(ValueError, match='WEB_AUTH_MODE'):
+        webapp.create_app(app.config['CONFIG_PATH'], 'test-password-at-least-16', start_scheduler=False)
