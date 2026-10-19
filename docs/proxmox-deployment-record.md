@@ -82,3 +82,11 @@ Validation totals: 125 Python tests and 9 Node tests passed. Native Finder proto
 Revision 6d07a67 adds a page favicon using the existing CPAP artwork and readable elapsed/update ages. Run-history durations and Wi-Fi sample ages use the same formatter. Values show up to two adjacent units, such as 2 hours 15 minutes or 1 day 3 hours; missing and future timestamps do not produce invalid labels.
 
 Deployed local image sha256:498aca25e05b39a78b4339a5fe558ff7dffba871439cce9e06e7e144f3e298e5 preserves the diagnostics mount and existing startup-sync setting. Live browser checks verified the PNG favicon, elapsed/update labels, readable run history and Wi-Fi age with no page errors. Synthetic browser checks covered multi-day values and a 390-pixel viewport. All 11 JavaScript tests and 25 focused web tests passed locally; the full GitHub test job also passed. The public image workflow republishes the same update for AMD64 and ARM64.
+
+## Password-free dashboard, 19 October 2026
+
+Deployed source revision `d08d16d` to CT 114 and set `WEB_AUTH_MODE=none` in its local `.env`. The downloader image is `sha256:18211d67e129c4eec0b30f2a6afbcfff3c7552feaa393b45a6be778fe9520e03`. Configuration and deployment files were backed up to `/root/ezshare-before-password-free-20261019`; the previous image remains tagged `ezsharecpap-downloader:before-password-free`.
+
+The restricted-container synthetic smoke check passed before activation. Live HTTP checks returned 200 for the dashboard and status without credentials, and 403 for settings submissions without a CSRF token or from a different origin. The downloader health command passed. The persistent session secret has mode 600 and belongs to the downloader account. Existing startup-sync behaviour started a run; completed data remained available. The diagnostics mount was retained.
+
+Samba was not recreated. Its CPAP share still requires the `cpap` user. Local validation passed 120 Python tests and 11 JavaScript tests, including a real HTTP upload in password-free mode. No new interactive browser or OSCAR import test was performed.
